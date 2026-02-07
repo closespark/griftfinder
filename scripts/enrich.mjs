@@ -29,6 +29,9 @@ const RATE_LIMITS = {
   open_states: 1100,
 };
 
+// States to investigate — add new states here to extend the pipeline
+const TARGET_STATES = ['MN', 'VA'];
+
 const lastCall = {};
 async function rateLimit(source) {
   const delay = RATE_LIMITS[source] || 1000;
@@ -340,8 +343,40 @@ const KNOWN_BIOGUIDES = {
   'pete stauber': { bioguideId: 'S001212', fullName: 'Stauber, Pete', state: 'Minnesota', party: 'Republican' },
   'dean phillips': { bioguideId: 'P000616', fullName: 'Phillips, Dean', state: 'Minnesota', party: 'Democratic' },
   'tim walz': { bioguideId: 'W000799', fullName: 'Walz, Timothy J.', state: 'Minnesota', party: 'Democratic' },
-  'tom perez': null, // Not a congress member (DNC chair / Maryland AG)
-  'jacob frey': null, // Mayor, not congress
+  // ── Virginia delegation ──
+  'mark warner': { bioguideId: 'W000805', fullName: 'Warner, Mark R.', state: 'Virginia', party: 'Democratic' },
+  'tim kaine': { bioguideId: 'K000384', fullName: 'Kaine, Tim', state: 'Virginia', party: 'Democratic' },
+  'rob wittman': { bioguideId: 'W000804', fullName: 'Wittman, Robert J.', state: 'Virginia', party: 'Republican' },
+  'robert wittman': { bioguideId: 'W000804', fullName: 'Wittman, Robert J.', state: 'Virginia', party: 'Republican' },
+  'jen kiggans': { bioguideId: 'K000399', fullName: 'Kiggans, Jennifer A.', state: 'Virginia', party: 'Republican' },
+  'jennifer kiggans': { bioguideId: 'K000399', fullName: 'Kiggans, Jennifer A.', state: 'Virginia', party: 'Republican' },
+  'bobby scott': { bioguideId: 'S000185', fullName: 'Scott, Robert C. "Bobby"', state: 'Virginia', party: 'Democratic' },
+  'robert scott': { bioguideId: 'S000185', fullName: 'Scott, Robert C. "Bobby"', state: 'Virginia', party: 'Democratic' },
+  'jennifer mcclellan': { bioguideId: 'M001227', fullName: 'McClellan, Jennifer L.', state: 'Virginia', party: 'Democratic' },
+  'john mcguire': { bioguideId: 'M001239', fullName: 'McGuire, John J. III', state: 'Virginia', party: 'Republican' },
+  'ben cline': { bioguideId: 'C001118', fullName: 'Cline, Ben', state: 'Virginia', party: 'Republican' },
+  'eugene vindman': { bioguideId: 'V000138', fullName: 'Vindman, Eugene Simon', state: 'Virginia', party: 'Democratic' },
+  'don beyer': { bioguideId: 'B001292', fullName: 'Beyer, Donald S. Jr.', state: 'Virginia', party: 'Democratic' },
+  'donald beyer': { bioguideId: 'B001292', fullName: 'Beyer, Donald S. Jr.', state: 'Virginia', party: 'Democratic' },
+  'morgan griffith': { bioguideId: 'G000568', fullName: 'Griffith, H. Morgan', state: 'Virginia', party: 'Republican' },
+  'suhas subramanyam': { bioguideId: 'S001230', fullName: 'Subramanyam, Suhas', state: 'Virginia', party: 'Democratic' },
+  'james walkinshaw': { bioguideId: 'W000831', fullName: 'Walkinshaw, James R.', state: 'Virginia', party: 'Democratic' },
+  // ── Non-congressional ──
+  'tom perez': null, // DNC chair / Maryland AG
+  'jacob frey': null, // Minneapolis Mayor
+  'danny avula': null, // Richmond Mayor
+  'cynthia newbille': null, // Richmond City Council
+  'katherine jordan': null, // Richmond City Council
+  'andrew breton': null, // Richmond City Council
+  'kenya gibson': null, // Richmond City Council
+  'sarah abubaker': null, // Richmond City Council
+  'stephanie lynch': null, // Richmond City Council
+  'ellen robertson': null, // Richmond City Council
+  'reva trammell': null, // Richmond City Council
+  'nicole jones': null, // Richmond City Council
+  'betsy carr': null, // VA House of Delegates (state-level, not federal)
+  'rae cousins': null, // VA House of Delegates
+  'lamont bagby': null, // VA State Senate
 };
 
 // Cache of state member lists so we only fetch once per state
@@ -381,17 +416,19 @@ async function findBioguideId(name) {
     return KNOWN_BIOGUIDES[nameKey]; // may be null for non-congress people
   }
 
-  // Try matching against MN members (most entities are MN-based)
-  const mnMembers = await getStateMembers('MN');
+  // Try matching against target state members
   const nameParts = nameKey.split(/\s+/);
   const lastName = nameParts[nameParts.length - 1];
   const firstName = nameParts[0];
 
-  for (const m of mnMembers) {
-    const mName = normalizeForMatch(m.name || '');
-    // Congress.gov uses "LastName, FirstName" format
-    if (mName.includes(lastName) && mName.includes(firstName)) {
-      return { bioguideId: m.bioguideId, fullName: m.name, state: m.state, party: m.partyName };
+  for (const state of TARGET_STATES) {
+    const members = await getStateMembers(state);
+    for (const m of members) {
+      const mName = normalizeForMatch(m.name || '');
+      // Congress.gov uses "LastName, FirstName" format
+      if (mName.includes(lastName) && mName.includes(firstName)) {
+        return { bioguideId: m.bioguideId, fullName: m.name, state: m.state, party: m.partyName };
+      }
     }
   }
 
@@ -402,15 +439,29 @@ async function findBioguideId(name) {
 // ── 5. Open States — state legislator bills ────────────────────────────────
 
 async function enrichOpenStates(entity) {
-  await rateLimit('open_states');
   const name = entity.canonical_name;
-  info(`Open States: searching people "${name}"`);
+  const entityState = entity.metadata?.state || null;
 
-  const encoded = encodeURIComponent(name);
-  const data = await fetchJSON(
-    `https://v3.openstates.org/people?name=${encoded}&jurisdiction=ocd-jurisdiction/country:us/state:mn/government`,
-    { 'X-API-KEY': OPEN_STATES_KEY }
-  );
+  // Determine which state jurisdictions to search
+  const statesToSearch = entityState
+    ? [entityState.toLowerCase()]
+    : TARGET_STATES.map(s => s.toLowerCase());
+
+  let data = null;
+  for (const st of statesToSearch) {
+    await rateLimit('open_states');
+    info(`Open States: searching people "${name}" in ${st.toUpperCase()}`);
+    const encoded = encodeURIComponent(name);
+    const result = await fetchJSON(
+      `https://v3.openstates.org/people?name=${encoded}&jurisdiction=ocd-jurisdiction/country:us/state:${st}/government`,
+      { 'X-API-KEY': OPEN_STATES_KEY }
+    );
+    if (result?.results && result.results.length > 0) {
+      data = result;
+      break;
+    }
+  }
+
   if (!data?.results || data.results.length === 0) {
     await sbLogEnrichment(entity.id, 'open_states', 'people', 0, 'empty');
     return;
@@ -427,10 +478,16 @@ async function enrichOpenStates(entity) {
     source: 'open_states',
   }]);
 
+  // Derive jurisdiction from the person's ID (e.g. ocd-person/... contains state in jurisdiction)
+  // Use the person's jurisdiction or fall back to matching from current_role
+  const personJurisdiction = person.jurisdiction?.id
+    || person.current_role?.org_classification && `ocd-jurisdiction/country:us/state:${(person.current_role?.district || '').split('/')[0] || 'mn'}/government`
+    || `ocd-jurisdiction/country:us/state:${(entityState || 'mn').toLowerCase()}/government`;
+
   // Now get their bills
   await rateLimit('open_states');
   const bills = await fetchJSON(
-    `https://v3.openstates.org/bills?sponsor=${encodeURIComponent(person.id)}&jurisdiction=ocd-jurisdiction/country:us/state:mn/government&per_page=50`,
+    `https://v3.openstates.org/bills?sponsor=${encodeURIComponent(person.id)}&jurisdiction=${encodeURIComponent(personJurisdiction)}&per_page=50`,
     { 'X-API-KEY': OPEN_STATES_KEY }
   );
   if (!bills?.results || bills.results.length === 0) {
@@ -510,19 +567,49 @@ ${GREEN}╔═══════════════════════
   ok(`${entities.length} entities loaded`);
   ok(`${politicians.length} politicians loaded`);
 
-  // ── Phase 0: Bootstrap — ensure all known MN targets exist as entities ───
-  header('PHASE 0: Bootstrap Missing MN Targets');
+  // ── Phase 0: Bootstrap — ensure all known targets exist as entities ──────
+  header(`PHASE 0: Bootstrap Missing Targets (${TARGET_STATES.join(', ')})`);
   const existingNames = new Set(entities.map(e => normalizeForMatch(e.canonical_name)));
-  const MN_TARGETS = [
+  const BOOTSTRAP_TARGETS = [
+    // ── Minnesota ──
     { name: 'Angie Craig', state: 'MN', party: 'D', district: '2nd' },
     { name: 'Brad Finstad', state: 'MN', party: 'R', district: '1st' },
     { name: 'Michelle Fischbach', state: 'MN', party: 'R', district: '7th' },
     { name: 'Pete Stauber', state: 'MN', party: 'R', district: '8th' },
     { name: 'Dean Phillips', state: 'MN', party: 'D', district: '3rd' },
     { name: 'Tim Walz', state: 'MN', party: 'D', district: 'Governor (former CD-1)' },
+    // ── Virginia ──
+    { name: 'Mark Warner', state: 'VA', party: 'D', district: 'Senate' },
+    { name: 'Tim Kaine', state: 'VA', party: 'D', district: 'Senate' },
+    { name: 'Rob Wittman', state: 'VA', party: 'R', district: '1st' },
+    { name: 'Jen Kiggans', state: 'VA', party: 'R', district: '2nd' },
+    { name: 'Bobby Scott', state: 'VA', party: 'D', district: '3rd' },
+    { name: 'Jennifer McClellan', state: 'VA', party: 'D', district: '4th' },
+    { name: 'John McGuire', state: 'VA', party: 'R', district: '5th' },
+    { name: 'Ben Cline', state: 'VA', party: 'R', district: '6th' },
+    { name: 'Eugene Vindman', state: 'VA', party: 'D', district: '7th' },
+    { name: 'Don Beyer', state: 'VA', party: 'D', district: '8th' },
+    { name: 'Morgan Griffith', state: 'VA', party: 'R', district: '9th' },
+    { name: 'Suhas Subramanyam', state: 'VA', party: 'D', district: '10th' },
+    { name: 'James Walkinshaw', state: 'VA', party: 'D', district: '11th' },
+    // ── Richmond, VA — City Officials ──
+    { name: 'Danny Avula', state: 'VA', party: 'D', district: 'Richmond Mayor' },
+    { name: 'Cynthia Newbille', state: 'VA', party: 'D', district: 'Richmond Council 7th (President)' },
+    { name: 'Katherine Jordan', state: 'VA', party: 'D', district: 'Richmond Council 2nd (VP)' },
+    { name: 'Andrew Breton', state: 'VA', party: 'D', district: 'Richmond Council 1st' },
+    { name: 'Kenya Gibson', state: 'VA', party: 'D', district: 'Richmond Council 3rd' },
+    { name: 'Sarah Abubaker', state: 'VA', party: 'D', district: 'Richmond Council 4th' },
+    { name: 'Stephanie Lynch', state: 'VA', party: 'D', district: 'Richmond Council 5th' },
+    { name: 'Ellen Robertson', state: 'VA', party: 'D', district: 'Richmond Council 6th' },
+    { name: 'Reva Trammell', state: 'VA', party: 'D', district: 'Richmond Council 8th' },
+    { name: 'Nicole Jones', state: 'VA', party: 'D', district: 'Richmond Council 9th' },
+    // ── Richmond, VA — State Legislators ──
+    { name: 'Betsy Carr', state: 'VA', party: 'D', district: 'VA House 78th' },
+    { name: 'Rae Cousins', state: 'VA', party: 'D', district: 'VA House 79th' },
+    { name: 'Lamont Bagby', state: 'VA', party: 'D', district: 'VA Senate 14th' },
   ];
   let bootstrapped = 0;
-  for (const t of MN_TARGETS) {
+  for (const t of BOOTSTRAP_TARGETS) {
     if (existingNames.has(normalizeForMatch(t.name))) {
       info(`${t.name} already exists in entities`);
       continue;
@@ -546,7 +633,7 @@ ${GREEN}╔═══════════════════════
     ok(`${bootstrapped} new entities bootstrapped — reloading entity list`);
     entities = await sbGet('entities', 'select=*&limit=500');
   } else {
-    ok('All MN targets already present');
+    ok('All targets already present');
   }
 
   // Identify politician entities (people who might be in Congress)
@@ -608,7 +695,7 @@ ${GREEN}╔═══════════════════════
   }
 
   // ── Phase 5: Open States (MN state legislators) ─────────────────────────
-  header('PHASE 5: Open States — MN State Legislators');
+  header(`PHASE 5: Open States — State Legislators (${TARGET_STATES.join(', ')})`);
   for (const entity of personEntities) {
     try {
       await enrichOpenStates(entity);
