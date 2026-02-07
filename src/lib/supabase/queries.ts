@@ -327,6 +327,50 @@ export async function getDashboardStats() {
   };
 }
 
+/** Get money flow network data — entities connected by FEC disbursements */
+export async function getMoneyNetwork() {
+  // Get cross-campaign signals (vendors paid by multiple committees)
+  const { data: crossSignals } = await supabase
+    .from('signals')
+    .select('*')
+    .eq('signal_type', 'CROSS_CAMPAIGN')
+    .limit(200);
+
+  // Get relationships
+  const { data: rels } = await supabase
+    .from('relationships')
+    .select('*')
+    .eq('is_current', true)
+    .limit(500);
+
+  // Get top disbursements grouped — we'll build the graph client-side
+  const { data: disbursements } = await supabase
+    .from('fec_disbursements')
+    .select('entity_id, recipient_name, disbursement_amount, committee_name, committee_id')
+    .order('disbursement_amount', { ascending: false })
+    .limit(2000);
+
+  // Get entities for name resolution
+  const { data: entities } = await supabase
+    .from('entities')
+    .select('id, canonical_name, entity_type')
+    .limit(500);
+
+  // Get kb_nodes for bridge/density scores
+  const { data: kbNodes } = await supabase
+    .from('kb_nodes')
+    .select('*')
+    .limit(500);
+
+  return {
+    crossSignals: (crossSignals || []) as Signal[],
+    relationships: (rels || []) as Relationship[],
+    disbursements: (disbursements || []) as FecDisbursement[],
+    entities: (entities || []) as Entity[],
+    kbNodes: (kbNodes || []) as Record<string, unknown>[],
+  };
+}
+
 /** Get politician universe stats */
 export async function getUniverseStats() {
   const { count } = await supabase

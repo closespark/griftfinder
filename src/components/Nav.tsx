@@ -8,6 +8,7 @@ const links = [
   { href: '/stories', label: 'STORIES' },
   { href: '/entities', label: 'ENTITIES' },
   { href: '/investigations', label: 'INVESTIGATIONS' },
+  { href: '/network', label: 'NETWORK' },
   { href: '/search', label: 'SEARCH' },
   { href: '/analysis', label: 'ANALYSIS' },
 ];
