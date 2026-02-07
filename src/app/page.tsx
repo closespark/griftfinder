@@ -194,11 +194,11 @@ export default function Home() {
                         {la.bill_type} {la.bill_number}
                       </span>
                       <span className="text-xs px-1.5 py-0.5 bg-zinc-900 text-zinc-500 border border-zinc-800">
-                        {la.sponsor_role}
+                        {la.action_type}
                       </span>
                       {la.policy_area && <span className="text-xs text-zinc-600">{la.policy_area}</span>}
                     </div>
-                    <p className="text-sm text-zinc-300 line-clamp-1">{la.title}</p>
+                    <p className="text-sm text-zinc-300 line-clamp-1">{la.bill_title}</p>
                     <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
                       {la.latest_action_date && <span>{la.latest_action_date}</span>}
                       {la.entity_id && (

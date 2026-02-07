@@ -140,11 +140,11 @@ export default function SearchPage() {
                         {la.bill_type} {la.bill_number}
                       </span>
                       <span className="text-xs px-1.5 py-0.5 bg-zinc-900 text-zinc-500 border border-zinc-800">
-                        {la.sponsor_role}
+                        {la.action_type}
                       </span>
                       {la.policy_area && <span className="text-xs text-zinc-600">{la.policy_area}</span>}
                     </div>
-                    <p className="text-sm text-zinc-300">{la.title}</p>
+                    <p className="text-sm text-zinc-300">{la.bill_title}</p>
                     <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
                       {la.latest_action_date && <span>{la.latest_action_date}</span>}
                       {la.entity_id && (
@@ -152,8 +152,8 @@ export default function SearchPage() {
                           View entity &rarr;
                         </Link>
                       )}
-                      {la.url && (
-                        <a href={la.url} target="_blank" rel="noopener noreferrer" className="text-green-500/60 hover:text-green-400">
+                      {la.bill_url && (
+                        <a href={la.bill_url} target="_blank" rel="noopener noreferrer" className="text-green-500/60 hover:text-green-400">
                           Source &rarr;
                         </a>
                       )}

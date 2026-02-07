@@ -607,7 +607,7 @@ function detectLegislationMoneyLoop(
     const totalDisb = disbs.reduce((s, d) => s + (d.disbursement_amount || 0), 0);
     if (totalDisb < 50_000) continue;
 
-    const sponsoredBills = bills.filter((b) => b.sponsor_role === 'sponsor');
+    const sponsoredBills = bills.filter((b) => b.action_type === 'bill_sponsored');
     if (sponsoredBills.length === 0) continue;
 
     const policyAreas = [...new Set(sponsoredBills.map((b) => b.policy_area).filter(Boolean))];
@@ -664,7 +664,7 @@ function detectDogeAgencyOverlap(
     const matchedAgencies = new Set<string>();
 
     for (const bill of bills) {
-      const titleLower = (bill.title || '').toLowerCase();
+      const titleLower = (bill.bill_title || '').toLowerCase();
       const policyLower = (bill.policy_area || '').toLowerCase();
       for (const agency of dogeAgencies) {
         if (agency && (titleLower.includes(agency) || policyLower.includes(agency))) {
@@ -680,8 +680,8 @@ function detectDogeAgencyOverlap(
     const agencyContracts = contracts.filter((c) =>
       matchedAgencies.has(c.agency?.toLowerCase() || '')
     );
-    const totalContractValue = agencyContracts.reduce((s, c) => s + (c.contract_value || 0), 0);
-    const totalSavings = agencyContracts.reduce((s, c) => s + (c.savings_claimed || 0), 0);
+    const totalContractValue = agencyContracts.reduce((s, c) => s + (c.total_value || 0), 0);
+    const totalSavings = agencyContracts.reduce((s, c) => s + (c.claimed_savings || 0), 0);
     const name = entityName(eid);
 
     stories.push({
@@ -694,7 +694,7 @@ function detectDogeAgencyOverlap(
         { id: eid, name, role: 'Legislator with agency overlap' },
       ],
       evidence: [
-        { type: 'Legislative Bills', description: matchingBills.map((b) => `${b.bill_type} ${b.bill_number}: ${b.title}`).slice(0, 3).join('; ') },
+        { type: 'Legislative Bills', description: matchingBills.map((b) => `${b.bill_type} ${b.bill_number}: ${b.bill_title}`).slice(0, 3).join('; ') },
         { type: 'DOGE Contracts', description: `${agencyContracts.length} contracts worth ${formatMoney(totalContractValue)} at overlapping agencies` },
       ],
       totalMoney: totalContractValue,

@@ -116,31 +116,34 @@ export interface Politician {
 export interface LegislativeAction {
   id: string;
   entity_id: string;
-  bill_id: string;
-  bill_type: string;
+  bioguide_id: string | null;
+  action_type: string; // bill_sponsored | bill_cosponsored
+  source: string;
+  congress_number: number | null;
+  bill_type: string | null;
   bill_number: string;
-  title: string;
-  sponsor_role: string; // sponsor | cosponsor
+  bill_title: string | null;
+  bill_url: string | null;
   policy_area: string | null;
-  congress: number;
-  introduced_date: string | null;
+  action_date: string | null;
   latest_action_date: string | null;
   latest_action_text: string | null;
-  url: string | null;
-  source: string;
   created_at: string;
 }
 
 export interface DogeContract {
   id: string;
   entity_id: string | null;
+  piid: string;
   agency: string;
-  vendor: string;
+  vendor_name: string | null;
+  vendor_name_normalized: string | null;
   description: string | null;
-  contract_value: number | null;
-  status: string | null;
-  savings_claimed: number | null;
-  doge_url: string | null;
+  total_value: number | null;
+  obligated_amount: number | null;
+  claimed_savings: number | null;
+  fpds_status: string | null;
+  deletion_date: string | null;
   created_at: string;
 }
 
@@ -148,12 +151,12 @@ export interface DogeGrant {
   id: string;
   entity_id: string | null;
   agency: string;
-  recipient: string;
+  recipient_name: string | null;
+  recipient_name_normalized: string | null;
   description: string | null;
   grant_value: number | null;
-  status: string | null;
-  savings_claimed: number | null;
-  doge_url: string | null;
+  claimed_savings: number | null;
+  grant_date: string | null;
   created_at: string;
 }
 
@@ -176,11 +179,10 @@ export interface RegulatoryComment {
   entity_id: string;
   document_id: string;
   docket_id: string | null;
-  comment_on_title: string | null;
-  agency: string | null;
+  title: string | null;
+  agency_id: string | null;
   posted_date: string | null;
-  comment_text: string | null;
-  source: string;
+  document_type: string | null;
   created_at: string;
 }
 
@@ -196,9 +198,10 @@ export interface PoliticianId {
 export interface EnrichmentLogEntry {
   id: string;
   entity_id: string;
-  source_api: string;
-  status: string; // success | error | no_data
+  source: string;
+  endpoint: string;
   records_found: number;
+  status: string; // success | error | empty
   error_message: string | null;
   queried_at: string;
 }
@@ -369,26 +372,14 @@ export async function getEntityFilings(entityName: string) {
   return data || [];
 }
 
-/** Get court cases for an entity */
-export async function getEntityCourtCases(entityName: string) {
-  const { data, error } = await supabase
-    .from('court_cases')
-    .select('*')
-    .ilike('entity_name', `%${entityName}%`)
-    .limit(50);
-  if (error) return [];
-  return data || [];
+/** Get court cases for an entity (table not yet created) */
+export async function getEntityCourtCases(_entityName: string) {
+  return [];
 }
 
-/** Get federal awards for an entity */
-export async function getEntityAwards(entityName: string) {
-  const { data, error } = await supabase
-    .from('federal_awards')
-    .select('*')
-    .ilike('entity_name', `%${entityName}%`)
-    .limit(50);
-  if (error) return [];
-  return data || [];
+/** Get federal awards for an entity (table not yet created) */
+export async function getEntityAwards(_entityName: string) {
+  return [];
 }
 
 /** Get legislative actions for an entity */
@@ -433,7 +424,7 @@ export async function getEntityDogeContracts(entityId: string): Promise<DogeCont
     .from('doge_contracts')
     .select('*')
     .eq('entity_id', entityId)
-    .order('contract_value', { ascending: false })
+    .order('total_value', { ascending: false })
     .limit(100);
   if (error) return [];
   return (data || []) as DogeContract[];
@@ -489,8 +480,8 @@ export async function getEntityEnrichmentLog(entityId: string): Promise<Enrichme
 export async function getDogeContracts(opts?: { agency?: string; search?: string; limit?: number; offset?: number }): Promise<{ data: DogeContract[]; count: number }> {
   let query = supabase.from('doge_contracts').select('*', { count: 'exact' });
   if (opts?.agency) query = query.eq('agency', opts.agency);
-  if (opts?.search) query = query.or(`vendor.ilike.%${opts.search}%,description.ilike.%${opts.search}%`);
-  query = query.order('contract_value', { ascending: false });
+  if (opts?.search) query = query.or(`vendor_name.ilike.%${opts.search}%,description.ilike.%${opts.search}%`);
+  query = query.order('total_value', { ascending: false });
   const limit = opts?.limit || 50;
   const offset = opts?.offset || 0;
   query = query.range(offset, offset + limit - 1);
@@ -503,7 +494,7 @@ export async function getDogeContracts(opts?: { agency?: string; search?: string
 export async function getDogeGrants(opts?: { agency?: string; search?: string; limit?: number; offset?: number }): Promise<{ data: DogeGrant[]; count: number }> {
   let query = supabase.from('doge_grants').select('*', { count: 'exact' });
   if (opts?.agency) query = query.eq('agency', opts.agency);
-  if (opts?.search) query = query.or(`recipient.ilike.%${opts.search}%,description.ilike.%${opts.search}%`);
+  if (opts?.search) query = query.or(`recipient_name.ilike.%${opts.search}%,description.ilike.%${opts.search}%`);
   query = query.order('grant_value', { ascending: false });
   const limit = opts?.limit || 50;
   const offset = opts?.offset || 0;
@@ -530,7 +521,7 @@ export async function searchLegislativeActions(query: string, limit = 20): Promi
   const { data, error } = await supabase
     .from('legislative_actions')
     .select('*')
-    .ilike('title', `%${query}%`)
+    .ilike('bill_title', `%${query}%`)
     .order('latest_action_date', { ascending: false })
     .limit(limit);
   if (error) return [];

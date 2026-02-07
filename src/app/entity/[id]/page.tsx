@@ -123,6 +123,23 @@ export default function EntityDossierPage() {
           <span className="text-green-500/50">{entity.entity_type}</span>
         </div>
         <h1 className="text-3xl font-bold text-white">{entity.canonical_name}</h1>
+        {(() => {
+          const meta = entity.metadata as Record<string, string> | null;
+          if (!meta?.state) return null;
+          const party = meta.party;
+          const partyLabel = party === 'D' ? 'Democrat' : party === 'R' ? 'Republican' : party;
+          const partyStyle = party === 'D' ? 'bg-blue-950/20 border-blue-500/30 text-blue-400'
+            : party === 'R' ? 'bg-red-950/20 border-red-500/30 text-red-400'
+            : 'bg-zinc-900 border-zinc-700 text-zinc-400';
+          return (
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              {party && <span className={`px-2 py-0.5 border ${partyStyle}`}>{partyLabel}</span>}
+              <span className="px-2 py-0.5 bg-zinc-900 border border-zinc-700 text-zinc-400">
+                {meta.state}{meta.district ? ` — ${meta.district}` : ''}
+              </span>
+            </div>
+          );
+        })()}
         {entity.aliases && entity.aliases.length > 0 && (
           <p className="mt-1 text-sm text-zinc-500">
             Also known as: {entity.aliases.join(', ')}
@@ -275,7 +292,7 @@ export default function EntityDossierPage() {
               <div key={la.id} className="px-5 py-3">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs px-2 py-0.5 bg-blue-950/30 text-blue-400 border border-blue-500/20">
-                    {la.sponsor_role}
+                    {la.action_type}
                   </span>
                   <span className="text-xs px-2 py-0.5 bg-zinc-900 text-zinc-400 border border-zinc-700">
                     {la.bill_type} {la.bill_number}
@@ -284,13 +301,13 @@ export default function EntityDossierPage() {
                     <span className="text-xs text-zinc-600">{la.policy_area}</span>
                   )}
                 </div>
-                <p className="text-sm text-zinc-300">{la.title}</p>
+                <p className="text-sm text-zinc-300">{la.bill_title}</p>
                 <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
-                  {la.introduced_date && <span>Introduced: {la.introduced_date}</span>}
+                  {la.action_date && <span>Date: {la.action_date}</span>}
                   {la.latest_action_date && <span>Latest: {la.latest_action_date}</span>}
-                  <span>Congress #{la.congress}</span>
-                  {la.url && (
-                    <a href={la.url} target="_blank" rel="noopener noreferrer" className="text-green-500/60 hover:text-green-400">
+                  <span>Congress #{la.congress_number}</span>
+                  {la.bill_url && (
+                    <a href={la.bill_url} target="_blank" rel="noopener noreferrer" className="text-green-500/60 hover:text-green-400">
                       Source &rarr;
                     </a>
                   )}
@@ -334,10 +351,9 @@ export default function EntityDossierPage() {
                   <span className="text-xs px-2 py-0.5 bg-purple-950/20 text-purple-300 border border-purple-500/15">
                     COMMENT
                   </span>
-                  {rc.agency && <span className="text-xs text-zinc-600">{rc.agency}</span>}
+                  {rc.agency_id && <span className="text-xs text-zinc-600">{rc.agency_id}</span>}
                 </div>
-                {rc.comment_on_title && <p className="text-sm text-zinc-300">{rc.comment_on_title}</p>}
-                {rc.comment_text && <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{rc.comment_text}</p>}
+                {rc.title && <p className="text-sm text-zinc-300">{rc.title}</p>}
                 <div className="mt-1 text-xs text-zinc-600">
                   {rc.docket_id && <span>Docket: {rc.docket_id}</span>}
                   {rc.posted_date && <span className="ml-3">{rc.posted_date}</span>}
@@ -361,17 +377,17 @@ export default function EntityDossierPage() {
                         CONTRACT
                       </span>
                       <span className="text-xs text-zinc-600">{dc.agency}</span>
-                      {dc.status && <span className="text-xs text-zinc-700">{dc.status}</span>}
+                      {dc.fpds_status && <span className="text-xs text-zinc-700">{dc.fpds_status}</span>}
                     </div>
-                    <p className="text-sm text-zinc-300">{dc.vendor}</p>
+                    <p className="text-sm text-zinc-300">{dc.vendor_name}</p>
                     {dc.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{dc.description}</p>}
                   </div>
                   <div className="text-right shrink-0">
-                    {dc.contract_value != null && dc.contract_value > 0 && (
-                      <div className="text-sm font-semibold text-green-400">{formatMoney(dc.contract_value)}</div>
+                    {dc.total_value != null && dc.total_value > 0 && (
+                      <div className="text-sm font-semibold text-green-400">{formatMoney(dc.total_value)}</div>
                     )}
-                    {dc.savings_claimed != null && dc.savings_claimed > 0 && (
-                      <div className="text-xs text-orange-400">Savings: {formatMoney(dc.savings_claimed)}</div>
+                    {dc.claimed_savings != null && dc.claimed_savings > 0 && (
+                      <div className="text-xs text-orange-400">Savings: {formatMoney(dc.claimed_savings)}</div>
                     )}
                   </div>
                 </div>
@@ -386,17 +402,16 @@ export default function EntityDossierPage() {
                         GRANT
                       </span>
                       <span className="text-xs text-zinc-600">{dg.agency}</span>
-                      {dg.status && <span className="text-xs text-zinc-700">{dg.status}</span>}
                     </div>
-                    <p className="text-sm text-zinc-300">{dg.recipient}</p>
+                    <p className="text-sm text-zinc-300">{dg.recipient_name}</p>
                     {dg.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{dg.description}</p>}
                   </div>
                   <div className="text-right shrink-0">
                     {dg.grant_value != null && dg.grant_value > 0 && (
                       <div className="text-sm font-semibold text-green-400">{formatMoney(dg.grant_value)}</div>
                     )}
-                    {dg.savings_claimed != null && dg.savings_claimed > 0 && (
-                      <div className="text-xs text-orange-400">Savings: {formatMoney(dg.savings_claimed)}</div>
+                    {dg.claimed_savings != null && dg.claimed_savings > 0 && (
+                      <div className="text-xs text-orange-400">Savings: {formatMoney(dg.claimed_savings)}</div>
                     )}
                   </div>
                 </div>
@@ -525,7 +540,7 @@ export default function EntityDossierPage() {
                   <span className={`h-2 w-2 rounded-full ${
                     el.status === 'success' ? 'bg-green-500' : el.status === 'error' ? 'bg-red-500' : 'bg-zinc-600'
                   }`} />
-                  <span className="text-xs text-green-400 font-mono">{el.source_api}</span>
+                  <span className="text-xs text-green-400 font-mono">{el.source}</span>
                 </div>
                 <div className="flex items-center gap-4 text-xs text-zinc-600">
                   <span>{el.records_found} records</span>
@@ -536,6 +551,16 @@ export default function EntityDossierPage() {
             ))}
           </div>
         </Section>
+      )}
+
+      {/* Empty state — show when entity has no data at all */}
+      {signals.length === 0 && allFindings.length === 0 && relationships.length === 0 && disbursements.length === 0 &&
+       legislativeActions.length === 0 && regulatoryActions.length === 0 && regulatoryComments.length === 0 &&
+       dogeContracts.length === 0 && dogeGrants.length === 0 && enrichmentLog.length === 0 && (
+        <div className="border border-zinc-800 bg-zinc-900/30 p-8 text-center">
+          <p className="text-zinc-500 text-sm">No intelligence data collected yet for this entity.</p>
+          <p className="text-zinc-600 text-xs mt-2">Run the enrichment pipeline to populate legislative, regulatory, and DOGE data.</p>
+        </div>
       )}
     </div>
   );

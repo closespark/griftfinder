@@ -61,10 +61,10 @@ export default function DogePage() {
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   // Stats
-  const contractTotal = contracts.reduce((s, c) => s + (c.contract_value || 0), 0);
+  const contractTotal = contracts.reduce((s, c) => s + (c.total_value || 0), 0);
   const grantTotal = grants.reduce((s, g) => s + (g.grant_value || 0), 0);
-  const contractSavings = contracts.reduce((s, c) => s + (c.savings_claimed || 0), 0);
-  const grantSavings = grants.reduce((s, g) => s + (g.savings_claimed || 0), 0);
+  const contractSavings = contracts.reduce((s, c) => s + (c.claimed_savings || 0), 0);
+  const grantSavings = grants.reduce((s, g) => s + (g.claimed_savings || 0), 0);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -174,9 +174,9 @@ export default function DogePage() {
                             CONTRACT
                           </span>
                           <span className="text-xs text-zinc-600">{c.agency}</span>
-                          {c.status && <span className="text-xs text-zinc-700">{c.status}</span>}
+                          {c.fpds_status && <span className="text-xs text-zinc-700">{c.fpds_status}</span>}
                         </div>
-                        <p className="text-sm text-zinc-300">{c.vendor}</p>
+                        <p className="text-sm text-zinc-300">{c.vendor_name}</p>
                         {c.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{c.description}</p>}
                         <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
                           {c.entity_id && (
@@ -184,19 +184,14 @@ export default function DogePage() {
                               View entity &rarr;
                             </Link>
                           )}
-                          {c.doge_url && (
-                            <a href={c.doge_url} target="_blank" rel="noopener noreferrer" className="text-orange-400/60 hover:text-orange-400">
-                              DOGE source &rarr;
-                            </a>
-                          )}
                         </div>
                       </div>
                       <div className="text-right shrink-0 ml-4">
-                        {c.contract_value != null && c.contract_value > 0 && (
-                          <div className="text-sm font-semibold text-green-400">{formatMoney(c.contract_value)}</div>
+                        {c.total_value != null && c.total_value > 0 && (
+                          <div className="text-sm font-semibold text-green-400">{formatMoney(c.total_value)}</div>
                         )}
-                        {c.savings_claimed != null && c.savings_claimed > 0 && (
-                          <div className="text-xs text-orange-400">Savings: {formatMoney(c.savings_claimed)}</div>
+                        {c.claimed_savings != null && c.claimed_savings > 0 && (
+                          <div className="text-xs text-orange-400">Savings: {formatMoney(c.claimed_savings)}</div>
                         )}
                       </div>
                     </div>
@@ -211,9 +206,8 @@ export default function DogePage() {
                             GRANT
                           </span>
                           <span className="text-xs text-zinc-600">{g.agency}</span>
-                          {g.status && <span className="text-xs text-zinc-700">{g.status}</span>}
                         </div>
-                        <p className="text-sm text-zinc-300">{g.recipient}</p>
+                        <p className="text-sm text-zinc-300">{g.recipient_name}</p>
                         {g.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{g.description}</p>}
                         <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
                           {g.entity_id && (
@@ -221,19 +215,14 @@ export default function DogePage() {
                               View entity &rarr;
                             </Link>
                           )}
-                          {g.doge_url && (
-                            <a href={g.doge_url} target="_blank" rel="noopener noreferrer" className="text-orange-400/60 hover:text-orange-400">
-                              DOGE source &rarr;
-                            </a>
-                          )}
                         </div>
                       </div>
                       <div className="text-right shrink-0 ml-4">
                         {g.grant_value != null && g.grant_value > 0 && (
                           <div className="text-sm font-semibold text-green-400">{formatMoney(g.grant_value)}</div>
                         )}
-                        {g.savings_claimed != null && g.savings_claimed > 0 && (
-                          <div className="text-xs text-orange-400">Savings: {formatMoney(g.savings_claimed)}</div>
+                        {g.claimed_savings != null && g.claimed_savings > 0 && (
+                          <div className="text-xs text-orange-400">Savings: {formatMoney(g.claimed_savings)}</div>
                         )}
                       </div>
                     </div>
