@@ -331,6 +331,7 @@ function formatSource(source: string): string {
     'opensanctions': 'OFAC Sanctions',
     'federal_register': 'Federal Register',
     'LDA': 'Senate Lobbying',
+    'web_search': 'Web / OSINT',
   };
   return map[source] || source.replace(/_/g, ' ');
 }
@@ -365,6 +366,35 @@ function renderFindingDetail(source: string, detail: Record<string, unknown>): R
               {d.agencies?.length > 0 && <span className="text-zinc-600"> — {d.agencies.join(', ')}</span>}
             </p>
           ))}
+        </div>
+      );
+    }
+  }
+
+  // Web search — show linked results
+  if (source === 'web_search') {
+    const results = detail.results as Array<{ title: string; url: string; snippet: string }>;
+    if (results?.length > 0) {
+      return (
+        <div className="mt-2 space-y-2">
+          {results.slice(0, 5).map((r, i) => (
+            <div key={i} className="text-xs pl-3">
+              <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-green-400 hover:underline">
+                {r.title}
+              </a>
+              <p className="text-zinc-600 mt-0.5">{r.snippet}</p>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    // Single result with url
+    if (detail.url) {
+      return (
+        <div className="mt-2 text-xs pl-3">
+          <a href={String(detail.url)} target="_blank" rel="noopener noreferrer" className="text-green-400 hover:underline">
+            {String(detail.snippet || 'View source')}
+          </a>
         </div>
       );
     }

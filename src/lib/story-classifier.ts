@@ -586,6 +586,7 @@ function formatSourceLabel(source: string): string {
     'opensanctions': 'Sanctions Screening',
     'federal_register': 'Federal Register',
     'LDA': 'Senate Lobbying',
+    'web_search': 'Web Search / OSINT',
   };
   return map[source] || source.replace(/_/g, ' ');
 }
