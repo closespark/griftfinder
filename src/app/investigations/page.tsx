@@ -3,17 +3,29 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
-import { getAllInvestigations, type MmixEntry } from '@/lib/supabase/queries';
+import { getAllInvestigations, getTopEntities, type MmixEntry, type Entity } from '@/lib/supabase/queries';
 
 export default function InvestigationsPage() {
   const [investigations, setInvestigations] = useState<MmixEntry[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'active' | 'expired'>('all');
 
   useEffect(() => {
     if (!isSupabaseConfigured()) { setLoading(false); return; }
-    getAllInvestigations(100).then(setInvestigations).finally(() => setLoading(false));
+    Promise.all([
+      getAllInvestigations(100),
+      getTopEntities(200),
+    ]).then(([inv, ent]) => {
+      setInvestigations(inv);
+      setEntities(ent);
+    }).finally(() => setLoading(false));
   }, []);
+
+  const entityNames = new Map(entities.map((e) => [e.id, e.canonical_name]));
+  function resolveName(inv: MmixEntry): string {
+    return inv.entity_name || entityNames.get(inv.entity_id) || inv.entity_id?.slice(0, 12) || 'Unknown';
+  }
 
   const filtered = filter === 'all'
     ? investigations
@@ -76,7 +88,7 @@ export default function InvestigationsPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className={`h-2 w-2 rounded-full ${isActive ? 'bg-green-500 animate-pulse' : 'bg-zinc-600'}`} />
-                      <span className="text-green-400">{inv.entity_name || inv.entity_id.slice(0, 16)}</span>
+                      <span className="text-green-400">{resolveName(inv)}</span>
                       <span className="text-xs text-zinc-600">P{inv.priority}</span>
                     </div>
                     <span className={`text-xs uppercase ${isActive ? 'text-green-400' : 'text-zinc-600'}`}>

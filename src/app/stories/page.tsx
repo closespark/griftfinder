@@ -3,31 +3,47 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
-import { getStories, getAllInvestigations, type StoryPublication, type MmixEntry } from '@/lib/supabase/queries';
+import { getStories, getAllInvestigations, getTopEntities, type StoryPublication, type MmixEntry, type Entity } from '@/lib/supabase/queries';
 
 export default function StoriesPage() {
   const [stories, setStories] = useState<StoryPublication[]>([]);
   const [investigations, setInvestigations] = useState<MmixEntry[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) { setLoading(false); return; }
     Promise.all([
       getStories(50),
-      getAllInvestigations(30),
-    ]).then(([s, inv]) => {
+      getAllInvestigations(50),
+      getTopEntities(200),
+    ]).then(([s, inv, ent]) => {
       setStories(s);
       setInvestigations(inv);
+      setEntities(ent);
     }).finally(() => setLoading(false));
   }, []);
 
-  // Merge published stories + completed investigations with findings into one feed
+  // Build entity name lookup
+  const entityNames = new Map(entities.map((e) => [e.id, e.canonical_name]));
+
+  function resolveEntityName(inv: MmixEntry): string {
+    // Try entity_name field first
+    if (inv.entity_name) return inv.entity_name;
+    // Look up from entities table
+    const name = entityNames.get(inv.entity_id);
+    if (name) return name;
+    // Last resort: show truncated ID
+    return inv.entity_id?.slice(0, 12) || 'Unknown';
+  }
+
+  // Merge published stories + investigations with findings into one feed
   const investigationCards = investigations
     .filter((inv) => (inv.findings || []).length > 0)
     .map((inv) => ({
       id: inv.id,
       type: 'investigation' as const,
-      title: inv.entity_name || 'Unknown Entity',
+      title: resolveEntityName(inv),
       subtitle: inv.thesis || '',
       date: inv.entered_at,
       status: inv.status,
@@ -85,11 +101,11 @@ export default function StoriesPage() {
                       <span className={`text-xs px-2 py-0.5 ${
                         card.status === 'published'
                           ? 'bg-green-950/40 text-green-400 border border-green-500/30'
-                          : card.status === 'active'
+                          : card.status === 'active' || card.status === 'investigating'
                           ? 'bg-yellow-950/40 text-yellow-400 border border-yellow-500/30'
                           : 'bg-zinc-900 text-zinc-500 border border-zinc-700'
                       }`}>
-                        {card.status.toUpperCase()}
+                        {card.status === 'investigating' ? 'IN PROGRESS' : card.status.toUpperCase()}
                       </span>
                       <span className="text-xs text-zinc-600">
                         {new Date(card.date).toLocaleDateString()}
@@ -110,9 +126,9 @@ export default function StoriesPage() {
                 {card.findings.length > 0 && (
                   <div className="mt-3 border-t border-green-500/10 pt-3 space-y-1">
                     {card.findings.slice(0, 3).map((f, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        <span className="text-green-500/50">[{f.source}]</span>
-                        <span className="text-zinc-500 truncate">{f.summary}</span>
+                      <div key={i} className="flex items-start gap-2 text-xs">
+                        <span className="text-green-500/50 shrink-0">[{formatSource(f.source)}]</span>
+                        <span className="text-zinc-400">{f.summary}</span>
                       </div>
                     ))}
                     {card.findings.length > 3 && (
@@ -129,4 +145,27 @@ export default function StoriesPage() {
       )}
     </div>
   );
+}
+
+function formatSource(source: string): string {
+  const map: Record<string, string> = {
+    'fec': 'FEC',
+    'courtlistener': 'Courts',
+    'usaspending': 'Federal Contracts',
+    'usaspending_grants': 'Grants',
+    'propublica_990': 'Nonprofits',
+    'sec_edgar': 'SEC',
+    'opencorporates': 'Corporate',
+    'sam_gov': 'SAM.gov',
+    'house_disclosures': 'Disclosures',
+    'irs_exempt_orgs': 'IRS',
+    'wikidata_family': 'Family',
+    'Senate LDA': 'Lobbying',
+    'OFAC SDN': 'Sanctions',
+    'Federal Register': 'Fed Register',
+    'senate_lda': 'Lobbying',
+    'opensanctions': 'Sanctions',
+    'federal_register': 'Fed Register',
+  };
+  return map[source] || source;
 }

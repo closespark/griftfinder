@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
-import { getDashboardStats, getActiveInvestigations, getRecentSignals, getUniverseStats, type MmixEntry, type Signal } from '@/lib/supabase/queries';
+import { getDashboardStats, getActiveInvestigations, getRecentSignals, getUniverseStats, getTopEntities, type MmixEntry, type Signal, type Entity } from '@/lib/supabase/queries';
 
 function formatSignal(sig: Signal): string {
   const d = sig.details as Record<string, unknown>;
@@ -34,6 +34,7 @@ export default function Home() {
   const [universe, setUniverse] = useState({ total: 0 });
   const [investigations, setInvestigations] = useState<MmixEntry[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -43,13 +44,20 @@ export default function Home() {
       getUniverseStats(),
       getActiveInvestigations(),
       getRecentSignals(15),
-    ]).then(([s, u, inv, sig]) => {
+      getTopEntities(200),
+    ]).then(([s, u, inv, sig, ent]) => {
       setStats(s);
       setUniverse(u);
       setInvestigations(inv);
       setSignals(sig);
+      setEntities(ent);
     }).finally(() => setLoading(false));
   }, []);
+
+  const entityNames = new Map(entities.map((e) => [e.id, e.canonical_name]));
+  function resolveName(inv: MmixEntry): string {
+    return inv.entity_name || entityNames.get(inv.entity_id) || inv.entity_id?.slice(0, 12) || 'Unknown';
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -106,7 +114,7 @@ export default function Home() {
                   return (
                     <Link key={inv.id} href={`/entity/${inv.entity_id}`} className="block px-4 py-3 hover:bg-green-950/20 transition-colors">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm text-green-400 font-semibold">{inv.entity_name || 'Unknown'}</span>
+                        <span className="text-sm text-green-400 font-semibold">{resolveName(inv)}</span>
                         <span className="text-xs text-zinc-600">{findings.length} findings</span>
                       </div>
                       {inv.thesis && (
