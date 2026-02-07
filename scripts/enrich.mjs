@@ -113,6 +113,13 @@ async function sbLogEnrichment(entityId, source, endpoint, recordsFound, status 
   }]);
 }
 
+// Check if an entity has already been enriched by a given source
+// Returns true if a log entry exists (skip this entity)
+async function alreadyEnriched(entityId, source) {
+  const rows = await sbGet('enrichment_log', `select=id&entity_id=eq.${entityId}&source=eq.${source}&limit=1`);
+  return rows.length > 0;
+}
+
 // ── API fetchers ───────────────────────────────────────────────────────────
 
 async function fetchJSON(url, headers = {}) {
@@ -641,10 +648,16 @@ ${GREEN}╔═══════════════════════
   ok(`${personEntities.length} person entities to enrich`);
 
   // ── Phase 1: DOGE data (global, not per-entity) ─────────────────────────
-  // Unique constraint is now (piid, vendor_name, agency) to handle "Unavailable" PIIDs
+  // Skip if data already exists in Supabase — no need to re-download 30k records every run
   header('PHASE 1: DOGE Data Ingestion');
-  await enrichDogeContracts();
-  await enrichDogeGrants();
+  const existingContracts = await sbGet('doge_contracts', 'select=id&limit=1');
+  const existingGrants = await sbGet('doge_grants', 'select=id&limit=1');
+  if (existingContracts.length > 0 && existingGrants.length > 0) {
+    ok('DOGE data already in Supabase — skipping download (delete rows to force re-fetch)');
+  } else {
+    if (existingContracts.length === 0) await enrichDogeContracts();
+    if (existingGrants.length === 0) await enrichDogeGrants();
+  }
 
   // ── Phase 2: Resolve bioguide IDs for known politicians ─────────────────
   header('PHASE 2: Congress.gov — Resolve Bioguide IDs');
@@ -673,9 +686,14 @@ ${GREEN}╔═══════════════════════
 
   // ── Phase 3: Congressional legislation per entity ───────────────────────
   header('PHASE 3: Congress.gov — Sponsored & Cosponsored Legislation');
+  let p3Skipped = 0;
   for (const [entityId, bioguideId] of bioguideMap) {
     const entity = entities.find(e => e.id === entityId);
     if (!entity) continue;
+    if (await alreadyEnriched(entityId, 'congress_gov')) {
+      p3Skipped++;
+      continue;
+    }
     try {
       await enrichCongressSponsored(entity, bioguideId);
       await enrichCongressCosponsored(entity, bioguideId);
@@ -683,36 +701,76 @@ ${GREEN}╔═══════════════════════
       fail(`Congress enrichment error for ${entity.canonical_name}: ${e.message}`);
     }
   }
+  if (p3Skipped) ok(`Skipped ${p3Skipped} already-enriched entities`);
 
   // ── Phase 4: Federal Register per entity ────────────────────────────────
   header('PHASE 4: Federal Register — Regulatory Actions');
+  let p4Skipped = 0;
   for (const entity of personEntities) {
+    if (await alreadyEnriched(entity.id, 'federal_register')) {
+      p4Skipped++;
+      continue;
+    }
     try {
       await enrichFederalRegister(entity);
     } catch (e) {
       fail(`Federal Register error for ${entity.canonical_name}: ${e.message}`);
     }
   }
+  if (p4Skipped) ok(`Skipped ${p4Skipped} already-enriched entities`);
 
   // ── Phase 5: Open States (MN state legislators) ─────────────────────────
   header(`PHASE 5: Open States — State Legislators (${TARGET_STATES.join(', ')})`);
-  for (const entity of personEntities) {
+
+  // Filter out entities that are clearly not legislators (family members, unnamed people, orgs, etc.)
+  const NON_LEGISLATOR_PATTERNS = [
+    /not disclosed/i, /\bunknown\b/i, /\bsibling/i, /\bbrother\b/i, /\bsister\b/i,
+    /\bdaughter\b/i, /\bson\b/i, /\bmother\b/i, /\bfather\b/i, /\bwife\b/i, /\bhusband\b/i,
+    /\bspouse\b/i, /\bchild/i, /\bfamily\b/i, /\btotal,?\s*names?\b/i,
+    /\byounger\b/i, /\bolder\b/i, /\belder\b/i, /\bminor\b/i,
+    /\bllc\b/i, /\binc\b/i, /\bcorp\b/i, /\bfoundation\b/i, /\bcommittee\b/i,
+    /\bgroup\b/i, /\bpartners\b/i, /\bassociates\b/i, /\bconsulting\b/i,
+  ];
+  function isPlausibleLegislator(name) {
+    if (!name || name.length < 4) return false;
+    // Must have at least a first and last name (2+ words)
+    if (name.trim().split(/\s+/).length < 2) return false;
+    return !NON_LEGISLATOR_PATTERNS.some(p => p.test(name));
+  }
+
+  const legislatorCandidates = personEntities.filter(e => isPlausibleLegislator(e.canonical_name));
+  const p5Filtered = personEntities.length - legislatorCandidates.length;
+  if (p5Filtered) ok(`Filtered out ${p5Filtered} non-legislator entities`);
+
+  let p5Skipped = 0;
+  for (const entity of legislatorCandidates) {
+    if (await alreadyEnriched(entity.id, 'open_states')) {
+      p5Skipped++;
+      continue;
+    }
     try {
       await enrichOpenStates(entity);
     } catch (e) {
       fail(`Open States error for ${entity.canonical_name}: ${e.message}`);
     }
   }
+  if (p5Skipped) ok(`Skipped ${p5Skipped} already-enriched entities`);
 
   // ── Phase 6: Regulations.gov per entity ─────────────────────────────────
   header('PHASE 6: Regulations.gov — Regulatory Documents');
+  let p6Skipped = 0;
   for (const entity of entities) {
+    if (await alreadyEnriched(entity.id, 'regulations_gov')) {
+      p6Skipped++;
+      continue;
+    }
     try {
       await enrichRegulations(entity);
     } catch (e) {
       fail(`Regulations.gov error for ${entity.canonical_name}: ${e.message}`);
     }
   }
+  if (p6Skipped) ok(`Skipped ${p6Skipped} already-enriched entities`);
 
   // ── Phase 7: Cross-reference DOGE vendors with existing entities ────────
   header('PHASE 7: DOGE Cross-Reference');
