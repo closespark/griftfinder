@@ -343,29 +343,37 @@ export async function getMoneyNetwork() {
     .eq('is_current', true)
     .limit(500);
 
-  // Get top disbursements grouped — we'll build the graph client-side
-  const { data: disbursements } = await supabase
-    .from('fec_disbursements')
-    .select('entity_id, recipient_name, disbursement_amount, committee_name, committee_id')
-    .order('disbursement_amount', { ascending: false })
-    .limit(2000);
+  // Get ALL disbursements (paginated)
+  const allDisbursements: FecDisbursement[] = [];
+  let offset = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data: page } = await supabase
+      .from('fec_disbursements')
+      .select('entity_id, recipient_name, disbursement_amount, committee_name, committee_id')
+      .range(offset, offset + pageSize - 1);
+    if (!page || page.length === 0) break;
+    allDisbursements.push(...(page as FecDisbursement[]));
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
 
   // Get entities for name resolution
   const { data: entities } = await supabase
     .from('entities')
     .select('id, canonical_name, entity_type')
-    .limit(500);
+    .limit(1000);
 
   // Get kb_nodes for bridge/density scores
   const { data: kbNodes } = await supabase
     .from('kb_nodes')
     .select('*')
-    .limit(500);
+    .limit(1000);
 
   return {
     crossSignals: (crossSignals || []) as Signal[],
     relationships: (rels || []) as Relationship[],
-    disbursements: (disbursements || []) as FecDisbursement[],
+    disbursements: allDisbursements,
     entities: (entities || []) as Entity[],
     kbNodes: (kbNodes || []) as Record<string, unknown>[],
   };
