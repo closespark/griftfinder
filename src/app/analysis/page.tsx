@@ -28,6 +28,11 @@ export default function AnalysisPage() {
   const [highRiskEntities, setHighRiskEntities] = useState<Entity[]>([]);
   const [recentSignals, setRecentSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mountedAt, setMountedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMountedAt(new Date().toISOString());
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -72,7 +77,7 @@ export default function AnalysisPage() {
           <span className="text-green-500">$</span> ENTITY_SCAN / ANALYSIS
         </h1>
         <p className="mt-2 font-mono text-sm text-green-400/60">
-          Real-time intelligence dashboard • {new Date().toISOString()}
+          Real-time intelligence dashboard{mountedAt ? ` • ${mountedAt}` : ''}
         </p>
       </div>
 
