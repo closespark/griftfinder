@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
-import { getDashboardStats, getActiveInvestigations, getRecentSignals, getUniverseStats, getTopEntities, type MmixEntry, type Signal, type Entity } from '@/lib/supabase/queries';
+import { getDashboardStats, getActiveInvestigations, getRecentSignals, getUniverseStats, getTopEntities, getRecentLegislativeActions, type MmixEntry, type Signal, type Entity, type LegislativeAction } from '@/lib/supabase/queries';
 
 function formatSignal(sig: Signal): string {
   const d = sig.details as Record<string, unknown>;
@@ -30,11 +30,12 @@ function signalDot(sig: Signal): string {
 }
 
 export default function Home() {
-  const [stats, setStats] = useState({ entityCount: 0, signalCount: 0, activeInvestigations: 0, publishedStories: 0 });
+  const [stats, setStats] = useState({ entityCount: 0, signalCount: 0, activeInvestigations: 0, publishedStories: 0, legislativeActionCount: 0, regulatoryActionCount: 0, dogeContractCount: 0, dogeGrantCount: 0 });
   const [universe, setUniverse] = useState({ total: 0 });
   const [investigations, setInvestigations] = useState<MmixEntry[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
+  const [recentLeg, setRecentLeg] = useState<LegislativeAction[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,12 +46,14 @@ export default function Home() {
       getActiveInvestigations(),
       getRecentSignals(15),
       getTopEntities(200),
-    ]).then(([s, u, inv, sig, ent]) => {
+      getRecentLegislativeActions(10),
+    ]).then(([s, u, inv, sig, ent, leg]) => {
       setStats(s);
       setUniverse(u);
       setInvestigations(inv);
       setSignals(sig);
       setEntities(ent);
+      setRecentLeg(leg);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -91,6 +94,21 @@ export default function Home() {
               { label: 'ANOMALIES DETECTED', value: stats.signalCount },
               { label: 'UNDER INVESTIGATION', value: stats.activeInvestigations },
               { label: 'STORIES PUBLISHED', value: stats.publishedStories },
+            ].map((s) => (
+              <div key={s.label} className="border border-green-500/20 bg-green-950/10 p-4">
+                <div className="text-xs text-green-500/60">{s.label}</div>
+                <div className="mt-1 text-3xl font-bold text-green-400">{s.value.toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Enrichment stats row */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-8">
+            {[
+              { label: 'LEGISLATIVE ACTIONS', value: stats.legislativeActionCount },
+              { label: 'REGULATORY ACTIONS', value: stats.regulatoryActionCount },
+              { label: 'DOGE CONTRACTS', value: stats.dogeContractCount },
+              { label: 'DOGE GRANTS', value: stats.dogeGrantCount },
             ].map((s) => (
               <div key={s.label} className="border border-green-500/20 bg-green-950/10 p-4">
                 <div className="text-xs text-green-500/60">{s.label}</div>
@@ -160,6 +178,40 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {/* Recent Legislative Actions */}
+          {recentLeg.length > 0 && (
+            <div className="mt-6 border border-green-500/20">
+              <div className="border-b border-green-500/20 bg-green-950/20 px-4 py-2 flex items-center justify-between">
+                <span className="text-xs text-green-500/70">RECENT LEGISLATIVE ACTIONS</span>
+                <Link href="/search" className="text-xs text-green-500/50 hover:text-green-400">Search all</Link>
+              </div>
+              <div className="divide-y divide-green-500/10">
+                {recentLeg.map((la) => (
+                  <div key={la.id} className="px-4 py-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs px-2 py-0.5 bg-blue-950/30 text-blue-400 border border-blue-500/20">
+                        {la.bill_type} {la.bill_number}
+                      </span>
+                      <span className="text-xs px-1.5 py-0.5 bg-zinc-900 text-zinc-500 border border-zinc-800">
+                        {la.sponsor_role}
+                      </span>
+                      {la.policy_area && <span className="text-xs text-zinc-600">{la.policy_area}</span>}
+                    </div>
+                    <p className="text-sm text-zinc-300 line-clamp-1">{la.title}</p>
+                    <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
+                      {la.latest_action_date && <span>{la.latest_action_date}</span>}
+                      {la.entity_id && (
+                        <Link href={`/entity/${la.entity_id}`} className="text-green-500/60 hover:text-green-400">
+                          View entity &rarr;
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* CTA */}
           <div className="mt-8 flex gap-4">

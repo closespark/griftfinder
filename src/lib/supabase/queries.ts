@@ -113,6 +113,108 @@ export interface Politician {
   updated_at: string;
 }
 
+export interface LegislativeAction {
+  id: string;
+  entity_id: string;
+  bill_id: string;
+  bill_type: string;
+  bill_number: string;
+  title: string;
+  sponsor_role: string; // sponsor | cosponsor
+  policy_area: string | null;
+  congress: number;
+  introduced_date: string | null;
+  latest_action_date: string | null;
+  latest_action_text: string | null;
+  url: string | null;
+  source: string;
+  created_at: string;
+}
+
+export interface DogeContract {
+  id: string;
+  entity_id: string | null;
+  agency: string;
+  vendor: string;
+  description: string | null;
+  contract_value: number | null;
+  status: string | null;
+  savings_claimed: number | null;
+  doge_url: string | null;
+  created_at: string;
+}
+
+export interface DogeGrant {
+  id: string;
+  entity_id: string | null;
+  agency: string;
+  recipient: string;
+  description: string | null;
+  grant_value: number | null;
+  status: string | null;
+  savings_claimed: number | null;
+  doge_url: string | null;
+  created_at: string;
+}
+
+export interface RegulatoryAction {
+  id: string;
+  entity_id: string;
+  document_number: string;
+  title: string;
+  doc_type: string;
+  agencies: string[];
+  publication_date: string | null;
+  abstract: string | null;
+  html_url: string | null;
+  source: string;
+  created_at: string;
+}
+
+export interface RegulatoryComment {
+  id: string;
+  entity_id: string;
+  document_id: string;
+  docket_id: string | null;
+  comment_on_title: string | null;
+  agency: string | null;
+  posted_date: string | null;
+  comment_text: string | null;
+  source: string;
+  created_at: string;
+}
+
+export interface PoliticianId {
+  id: string;
+  entity_id: string;
+  id_type: string; // BIOGUIDE | OPEN_STATES | FEC | etc.
+  id_value: string;
+  source: string;
+  created_at: string;
+}
+
+export interface EnrichmentLogEntry {
+  id: string;
+  entity_id: string;
+  source_api: string;
+  status: string; // success | error | no_data
+  records_found: number;
+  error_message: string | null;
+  queried_at: string;
+}
+
+export interface CorruptionLoopLink {
+  id: string;
+  entity_id: string;
+  loop_type: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  linked_entity_id: string | null;
+  linked_entity_name: string | null;
+  description: string;
+  created_at: string;
+}
+
 // ── Queries ──
 
 /** Get active + investigating MMIX entries (Ralph's investigation queue) */
@@ -289,6 +391,175 @@ export async function getEntityAwards(entityName: string) {
   return data || [];
 }
 
+/** Get legislative actions for an entity */
+export async function getEntityLegislativeActions(entityId: string): Promise<LegislativeAction[]> {
+  const { data, error } = await supabase
+    .from('legislative_actions')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('latest_action_date', { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data || []) as LegislativeAction[];
+}
+
+/** Get regulatory actions for an entity */
+export async function getEntityRegulatoryActions(entityId: string): Promise<RegulatoryAction[]> {
+  const { data, error } = await supabase
+    .from('regulatory_actions')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('publication_date', { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data || []) as RegulatoryAction[];
+}
+
+/** Get regulatory comments for an entity */
+export async function getEntityRegulatoryComments(entityId: string): Promise<RegulatoryComment[]> {
+  const { data, error } = await supabase
+    .from('regulatory_comments')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('posted_date', { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data || []) as RegulatoryComment[];
+}
+
+/** Get DOGE contracts for an entity */
+export async function getEntityDogeContracts(entityId: string): Promise<DogeContract[]> {
+  const { data, error } = await supabase
+    .from('doge_contracts')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('contract_value', { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data || []) as DogeContract[];
+}
+
+/** Get DOGE grants for an entity */
+export async function getEntityDogeGrants(entityId: string): Promise<DogeGrant[]> {
+  const { data, error } = await supabase
+    .from('doge_grants')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('grant_value', { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data || []) as DogeGrant[];
+}
+
+/** Get politician IDs for an entity */
+export async function getEntityPoliticianIds(entityId: string): Promise<PoliticianId[]> {
+  const { data, error } = await supabase
+    .from('politician_ids')
+    .select('*')
+    .eq('entity_id', entityId);
+  if (error) return [];
+  return (data || []) as PoliticianId[];
+}
+
+/** Get corruption loop links for an entity */
+export async function getEntityCorruptionLoops(entityId: string): Promise<CorruptionLoopLink[]> {
+  const { data, error } = await supabase
+    .from('corruption_loop_links')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('confidence', { ascending: false })
+    .limit(50);
+  if (error) return [];
+  return (data || []) as CorruptionLoopLink[];
+}
+
+/** Get enrichment log for an entity */
+export async function getEntityEnrichmentLog(entityId: string): Promise<EnrichmentLogEntry[]> {
+  const { data, error } = await supabase
+    .from('enrichment_log')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('queried_at', { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data || []) as EnrichmentLogEntry[];
+}
+
+/** Get DOGE contracts with optional agency filter and search */
+export async function getDogeContracts(opts?: { agency?: string; search?: string; limit?: number; offset?: number }): Promise<{ data: DogeContract[]; count: number }> {
+  let query = supabase.from('doge_contracts').select('*', { count: 'exact' });
+  if (opts?.agency) query = query.eq('agency', opts.agency);
+  if (opts?.search) query = query.or(`vendor.ilike.%${opts.search}%,description.ilike.%${opts.search}%`);
+  query = query.order('contract_value', { ascending: false });
+  const limit = opts?.limit || 50;
+  const offset = opts?.offset || 0;
+  query = query.range(offset, offset + limit - 1);
+  const { data, error, count } = await query;
+  if (error) return { data: [], count: 0 };
+  return { data: (data || []) as DogeContract[], count: count || 0 };
+}
+
+/** Get DOGE grants with optional agency filter and search */
+export async function getDogeGrants(opts?: { agency?: string; search?: string; limit?: number; offset?: number }): Promise<{ data: DogeGrant[]; count: number }> {
+  let query = supabase.from('doge_grants').select('*', { count: 'exact' });
+  if (opts?.agency) query = query.eq('agency', opts.agency);
+  if (opts?.search) query = query.or(`recipient.ilike.%${opts.search}%,description.ilike.%${opts.search}%`);
+  query = query.order('grant_value', { ascending: false });
+  const limit = opts?.limit || 50;
+  const offset = opts?.offset || 0;
+  query = query.range(offset, offset + limit - 1);
+  const { data, error, count } = await query;
+  if (error) return { data: [], count: 0 };
+  return { data: (data || []) as DogeGrant[], count: count || 0 };
+}
+
+/** Get unique DOGE agencies */
+export async function getDogeAgencies(): Promise<string[]> {
+  const [{ data: contracts }, { data: grants }] = await Promise.all([
+    supabase.from('doge_contracts').select('agency').limit(5000),
+    supabase.from('doge_grants').select('agency').limit(5000),
+  ]);
+  const agencies = new Set<string>();
+  for (const r of (contracts || [])) { const a = (r as Record<string, unknown>).agency as string; if (a) agencies.add(a); }
+  for (const r of (grants || [])) { const a = (r as Record<string, unknown>).agency as string; if (a) agencies.add(a); }
+  return [...agencies].sort();
+}
+
+/** Search legislative actions by title */
+export async function searchLegislativeActions(query: string, limit = 20): Promise<LegislativeAction[]> {
+  const { data, error } = await supabase
+    .from('legislative_actions')
+    .select('*')
+    .ilike('title', `%${query}%`)
+    .order('latest_action_date', { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return (data || []) as LegislativeAction[];
+}
+
+/** Search regulatory actions by title */
+export async function searchRegulatoryActions(query: string, limit = 20): Promise<RegulatoryAction[]> {
+  const { data, error } = await supabase
+    .from('regulatory_actions')
+    .select('*')
+    .ilike('title', `%${query}%`)
+    .order('publication_date', { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return (data || []) as RegulatoryAction[];
+}
+
+/** Get recent legislative actions across all entities */
+export async function getRecentLegislativeActions(limit = 10): Promise<LegislativeAction[]> {
+  const { data, error } = await supabase
+    .from('legislative_actions')
+    .select('*')
+    .order('latest_action_date', { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return (data || []) as LegislativeAction[];
+}
+
 /** Search entities by name */
 export async function searchEntities(query: string, limit = 20): Promise<Entity[]> {
   const { data, error } = await supabase
@@ -313,17 +584,25 @@ export async function searchPoliticians(query: string, limit = 20): Promise<Poli
 
 /** Get aggregate stats for the dashboard */
 export async function getDashboardStats() {
-  const [entities, signals, mmix, stories] = await Promise.all([
+  const [entities, signals, mmix, stories, legActions, regActions, dogeContracts, dogeGrants] = await Promise.all([
     supabase.from('entities').select('id', { count: 'exact', head: true }),
     supabase.from('signals').select('id', { count: 'exact', head: true }),
     supabase.from('mmix_entries').select('id', { count: 'exact', head: true }).in('status', ['active', 'investigating']),
     supabase.from('story_coverage').select('id', { count: 'exact', head: true }).eq('record_type', 'publication'),
+    supabase.from('legislative_actions').select('id', { count: 'exact', head: true }),
+    supabase.from('regulatory_actions').select('id', { count: 'exact', head: true }),
+    supabase.from('doge_contracts').select('id', { count: 'exact', head: true }),
+    supabase.from('doge_grants').select('id', { count: 'exact', head: true }),
   ]);
   return {
     entityCount: entities.count || 0,
     signalCount: signals.count || 0,
     activeInvestigations: mmix.count || 0,
     publishedStories: stories.count || 0,
+    legislativeActionCount: legActions.count || 0,
+    regulatoryActionCount: regActions.count || 0,
+    dogeContractCount: dogeContracts.count || 0,
+    dogeGrantCount: dogeGrants.count || 0,
   };
 }
 
@@ -435,6 +714,24 @@ export async function getStoryClassificationData() {
     .select('*')
     .limit(1000);
 
+  // Enrichment tables for new pattern detectors
+  const { data: legActions } = await supabase
+    .from('legislative_actions')
+    .select('*')
+    .order('latest_action_date', { ascending: false })
+    .limit(2000);
+
+  const { data: dogeContracts } = await supabase
+    .from('doge_contracts')
+    .select('*')
+    .limit(2000);
+
+  const { data: regActions } = await supabase
+    .from('regulatory_actions')
+    .select('*')
+    .order('publication_date', { ascending: false })
+    .limit(2000);
+
   return {
     signals: (signals || []) as Signal[],
     investigations: (mmix || []) as MmixEntry[],
@@ -443,6 +740,9 @@ export async function getStoryClassificationData() {
     disbursements: allDisbursements,
     screenings: (screenings || []) as ScreeningResult[],
     kbNodes: (kbNodes || []) as Record<string, unknown>[],
+    legislativeActions: (legActions || []) as LegislativeAction[],
+    dogeContracts: (dogeContracts || []) as DogeContract[],
+    regulatoryActions: (regActions || []) as RegulatoryAction[],
   };
 }
 

@@ -7,7 +7,12 @@ import { isSupabaseConfigured } from '@/lib/supabase/client';
 import {
   getEntity, getEntitySignals, getEntityInvestigations, getEntityRelationships,
   getEntityDisbursements, getEntityScreenings, getEntityFilings, getEntityCourtCases, getEntityAwards,
+  getEntityLegislativeActions, getEntityRegulatoryActions, getEntityRegulatoryComments,
+  getEntityDogeContracts, getEntityDogeGrants, getEntityPoliticianIds,
+  getEntityCorruptionLoops, getEntityEnrichmentLog,
   type Entity, type Signal, type MmixEntry, type Relationship, type FecDisbursement, type ScreeningResult,
+  type LegislativeAction, type RegulatoryAction, type RegulatoryComment,
+  type DogeContract, type DogeGrant, type PoliticianId, type CorruptionLoopLink, type EnrichmentLogEntry,
 } from '@/lib/supabase/queries';
 
 function formatMoney(n: number): string {
@@ -33,6 +38,14 @@ export default function EntityDossierPage() {
   const [filings, setFilings] = useState<Record<string, unknown>[]>([]);
   const [courtCases, setCourtCases] = useState<Record<string, unknown>[]>([]);
   const [awards, setAwards] = useState<Record<string, unknown>[]>([]);
+  const [legislativeActions, setLegislativeActions] = useState<LegislativeAction[]>([]);
+  const [regulatoryActions, setRegulatoryActions] = useState<RegulatoryAction[]>([]);
+  const [regulatoryComments, setRegulatoryComments] = useState<RegulatoryComment[]>([]);
+  const [dogeContracts, setDogeContracts] = useState<DogeContract[]>([]);
+  const [dogeGrants, setDogeGrants] = useState<DogeGrant[]>([]);
+  const [politicianIds, setPoliticianIds] = useState<PoliticianId[]>([]);
+  const [corruptionLoops, setCorruptionLoops] = useState<CorruptionLoopLink[]>([]);
+  const [enrichmentLog, setEnrichmentLog] = useState<EnrichmentLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,7 +54,7 @@ export default function EntityDossierPage() {
       setEntity(ent);
       if (!ent) { setLoading(false); return; }
       const name = ent.canonical_name;
-      const [sig, inv, rel, disb, scr, fil, court, awd] = await Promise.all([
+      const [sig, inv, rel, disb, scr, fil, court, awd, legAct, regAct, regCom, dogeCon, dogeGr, polIds, corrLoops, enrLog] = await Promise.all([
         getEntitySignals(id),
         getEntityInvestigations(id),
         getEntityRelationships(id),
@@ -50,6 +63,14 @@ export default function EntityDossierPage() {
         getEntityFilings(name),
         getEntityCourtCases(name),
         getEntityAwards(name),
+        getEntityLegislativeActions(id),
+        getEntityRegulatoryActions(id),
+        getEntityRegulatoryComments(id),
+        getEntityDogeContracts(id),
+        getEntityDogeGrants(id),
+        getEntityPoliticianIds(id),
+        getEntityCorruptionLoops(id),
+        getEntityEnrichmentLog(id),
       ]);
       setSignals(sig);
       setInvestigations(inv);
@@ -59,6 +80,14 @@ export default function EntityDossierPage() {
       setFilings(fil);
       setCourtCases(court);
       setAwards(awd);
+      setLegislativeActions(legAct);
+      setRegulatoryActions(regAct);
+      setRegulatoryComments(regCom);
+      setDogeContracts(dogeCon);
+      setDogeGrants(dogeGr);
+      setPoliticianIds(polIds);
+      setCorruptionLoops(corrLoops);
+      setEnrichmentLog(enrLog);
       setLoading(false);
     });
   }, [id]);
@@ -99,6 +128,15 @@ export default function EntityDossierPage() {
             Also known as: {entity.aliases.join(', ')}
           </p>
         )}
+        {politicianIds.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {politicianIds.map((pid) => (
+              <span key={pid.id} className="text-xs px-2 py-0.5 bg-zinc-900 border border-zinc-700 text-zinc-400 font-mono">
+                {pid.id_type}: {pid.id_value}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Quick summary line */}
         <div className="mt-4 flex flex-wrap gap-3 text-xs">
@@ -125,6 +163,21 @@ export default function EntityDossierPage() {
           {screenings.length > 0 && (
             <span className="px-2 py-1 bg-red-950/20 border border-red-500/20 text-red-400">
               {screenings.length} screening matches
+            </span>
+          )}
+          {legislativeActions.length > 0 && (
+            <span className="px-2 py-1 bg-blue-950/20 border border-blue-500/20 text-blue-400">
+              {legislativeActions.length} legislative actions
+            </span>
+          )}
+          {(regulatoryActions.length > 0 || regulatoryComments.length > 0) && (
+            <span className="px-2 py-1 bg-purple-950/20 border border-purple-500/20 text-purple-400">
+              {regulatoryActions.length + regulatoryComments.length} regulatory records
+            </span>
+          )}
+          {(dogeContracts.length > 0 || dogeGrants.length > 0) && (
+            <span className="px-2 py-1 bg-orange-950/20 border border-orange-500/20 text-orange-400">
+              {dogeContracts.length + dogeGrants.length} DOGE records
             </span>
           )}
         </div>
@@ -214,6 +267,173 @@ export default function EntityDossierPage() {
         </Section>
       )}
 
+      {/* Legislative Record */}
+      {legislativeActions.length > 0 && (
+        <Section title="LEGISLATIVE RECORD" count={legislativeActions.length}>
+          <div className="divide-y divide-green-500/10">
+            {legislativeActions.map((la) => (
+              <div key={la.id} className="px-5 py-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs px-2 py-0.5 bg-blue-950/30 text-blue-400 border border-blue-500/20">
+                    {la.sponsor_role}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 bg-zinc-900 text-zinc-400 border border-zinc-700">
+                    {la.bill_type} {la.bill_number}
+                  </span>
+                  {la.policy_area && (
+                    <span className="text-xs text-zinc-600">{la.policy_area}</span>
+                  )}
+                </div>
+                <p className="text-sm text-zinc-300">{la.title}</p>
+                <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
+                  {la.introduced_date && <span>Introduced: {la.introduced_date}</span>}
+                  {la.latest_action_date && <span>Latest: {la.latest_action_date}</span>}
+                  <span>Congress #{la.congress}</span>
+                  {la.url && (
+                    <a href={la.url} target="_blank" rel="noopener noreferrer" className="text-green-500/60 hover:text-green-400">
+                      Source &rarr;
+                    </a>
+                  )}
+                </div>
+                {la.latest_action_text && (
+                  <p className="mt-1 text-xs text-zinc-500 italic">{la.latest_action_text}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Regulatory Involvement */}
+      {(regulatoryActions.length > 0 || regulatoryComments.length > 0) && (
+        <Section title="REGULATORY INVOLVEMENT" count={regulatoryActions.length + regulatoryComments.length}>
+          <div className="divide-y divide-green-500/10">
+            {regulatoryActions.map((ra) => (
+              <div key={ra.id} className="px-5 py-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs px-2 py-0.5 bg-purple-950/30 text-purple-400 border border-purple-500/20">
+                    {ra.doc_type}
+                  </span>
+                  <span className="text-xs text-zinc-600">{ra.document_number}</span>
+                </div>
+                <p className="text-sm text-zinc-300">{ra.title}</p>
+                <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
+                  {ra.agencies?.length > 0 && <span>{ra.agencies.join(', ')}</span>}
+                  {ra.publication_date && <span>{ra.publication_date}</span>}
+                  {ra.html_url && (
+                    <a href={ra.html_url} target="_blank" rel="noopener noreferrer" className="text-green-500/60 hover:text-green-400">
+                      Federal Register &rarr;
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+            {regulatoryComments.map((rc) => (
+              <div key={rc.id} className="px-5 py-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs px-2 py-0.5 bg-purple-950/20 text-purple-300 border border-purple-500/15">
+                    COMMENT
+                  </span>
+                  {rc.agency && <span className="text-xs text-zinc-600">{rc.agency}</span>}
+                </div>
+                {rc.comment_on_title && <p className="text-sm text-zinc-300">{rc.comment_on_title}</p>}
+                {rc.comment_text && <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{rc.comment_text}</p>}
+                <div className="mt-1 text-xs text-zinc-600">
+                  {rc.docket_id && <span>Docket: {rc.docket_id}</span>}
+                  {rc.posted_date && <span className="ml-3">{rc.posted_date}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* DOGE Data */}
+      {(dogeContracts.length > 0 || dogeGrants.length > 0) && (
+        <Section title="DOGE DATA" count={dogeContracts.length + dogeGrants.length}>
+          <div className="divide-y divide-green-500/10">
+            {dogeContracts.map((dc) => (
+              <div key={dc.id} className="px-5 py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs px-2 py-0.5 bg-orange-950/30 text-orange-400 border border-orange-500/20">
+                        CONTRACT
+                      </span>
+                      <span className="text-xs text-zinc-600">{dc.agency}</span>
+                      {dc.status && <span className="text-xs text-zinc-700">{dc.status}</span>}
+                    </div>
+                    <p className="text-sm text-zinc-300">{dc.vendor}</p>
+                    {dc.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{dc.description}</p>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {dc.contract_value != null && dc.contract_value > 0 && (
+                      <div className="text-sm font-semibold text-green-400">{formatMoney(dc.contract_value)}</div>
+                    )}
+                    {dc.savings_claimed != null && dc.savings_claimed > 0 && (
+                      <div className="text-xs text-orange-400">Savings: {formatMoney(dc.savings_claimed)}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {dogeGrants.map((dg) => (
+              <div key={dg.id} className="px-5 py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs px-2 py-0.5 bg-orange-950/20 text-orange-300 border border-orange-500/15">
+                        GRANT
+                      </span>
+                      <span className="text-xs text-zinc-600">{dg.agency}</span>
+                      {dg.status && <span className="text-xs text-zinc-700">{dg.status}</span>}
+                    </div>
+                    <p className="text-sm text-zinc-300">{dg.recipient}</p>
+                    {dg.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{dg.description}</p>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {dg.grant_value != null && dg.grant_value > 0 && (
+                      <div className="text-sm font-semibold text-green-400">{formatMoney(dg.grant_value)}</div>
+                    )}
+                    {dg.savings_claimed != null && dg.savings_claimed > 0 && (
+                      <div className="text-xs text-orange-400">Savings: {formatMoney(dg.savings_claimed)}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Corruption Loop Analysis */}
+      {corruptionLoops.length > 0 && (
+        <Section title="CORRUPTION LOOP ANALYSIS" count={corruptionLoops.length}>
+          <div className="divide-y divide-green-500/10">
+            {corruptionLoops.map((cl) => (
+              <div key={cl.id} className="px-5 py-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs px-2 py-0.5 bg-red-950/30 text-red-400 border border-red-500/20">
+                    {cl.loop_type.replace(/_/g, ' ')}
+                  </span>
+                  <span className={`text-xs ${cl.confidence >= 0.7 ? 'text-red-400' : cl.confidence >= 0.4 ? 'text-yellow-400' : 'text-zinc-500'}`}>
+                    {(cl.confidence * 100).toFixed(0)}% confidence
+                  </span>
+                </div>
+                <p className="text-sm text-zinc-300">{cl.description}</p>
+                {cl.linked_entity_name && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Linked to: {cl.linked_entity_id ? (
+                      <Link href={`/entity/${cl.linked_entity_id}`} className="text-green-400 hover:underline">{cl.linked_entity_name}</Link>
+                    ) : cl.linked_entity_name}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {/* Corporate / Regulatory Filings */}
       {filings.length > 0 && (
         <Section title="CORPORATE & REGULATORY FILINGS" count={filings.length}>
@@ -295,6 +515,28 @@ export default function EntityDossierPage() {
           </div>
         </Section>
       )}
+      {/* Data Sources Queried */}
+      {enrichmentLog.length > 0 && (
+        <Section title="DATA SOURCES QUERIED" count={enrichmentLog.length}>
+          <div className="divide-y divide-green-500/10">
+            {enrichmentLog.map((el) => (
+              <div key={el.id} className="px-5 py-2 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className={`h-2 w-2 rounded-full ${
+                    el.status === 'success' ? 'bg-green-500' : el.status === 'error' ? 'bg-red-500' : 'bg-zinc-600'
+                  }`} />
+                  <span className="text-xs text-green-400 font-mono">{el.source_api}</span>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-zinc-600">
+                  <span>{el.records_found} records</span>
+                  <span className={el.status === 'error' ? 'text-red-400' : ''}>{el.status}</span>
+                  <span>{new Date(el.queried_at).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -332,6 +574,10 @@ function formatSource(source: string): string {
     'federal_register': 'Federal Register',
     'LDA': 'Senate Lobbying',
     'web_search': 'Web / OSINT',
+    'congress_gov': 'Congress.gov',
+    'open_states': 'Open States',
+    'regulations_gov': 'Regulations.gov',
+    'doge_api': 'DOGE',
   };
   return map[source] || source.replace(/_/g, ' ');
 }

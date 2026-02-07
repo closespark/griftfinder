@@ -8,7 +8,7 @@ import {
 } from '@/lib/supabase/queries';
 
 export default function AnalysisPage() {
-  const [stats, setStats] = useState({ entityCount: 0, signalCount: 0, activeInvestigations: 0, publishedStories: 0 });
+  const [stats, setStats] = useState({ entityCount: 0, signalCount: 0, activeInvestigations: 0, publishedStories: 0, legislativeActionCount: 0, regulatoryActionCount: 0, dogeContractCount: 0, dogeGrantCount: 0 });
   const [signalCounts, setSignalCounts] = useState<{ type: string; count: number }[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [investigations, setInvestigations] = useState<MmixEntry[]>([]);
@@ -82,6 +82,36 @@ export default function AnalysisPage() {
               })}
               {signalCounts.length === 0 && (
                 <div className="text-center text-zinc-600 text-sm py-4">No signals yet</div>
+              )}
+            </div>
+          </div>
+
+          {/* Enrichment Data Breakdown */}
+          <div className="border border-green-500/20">
+            <div className="border-b border-green-500/20 bg-green-950/20 px-4 py-2">
+              <span className="text-xs text-green-500/70">ENRICHMENT DATA BREAKDOWN</span>
+            </div>
+            <div className="p-4 space-y-2">
+              {[
+                { label: 'Legislative Actions', count: stats.legislativeActionCount, color: 'bg-blue-500/40' },
+                { label: 'Regulatory Actions', count: stats.regulatoryActionCount, color: 'bg-purple-500/40' },
+                { label: 'DOGE Contracts', count: stats.dogeContractCount, color: 'bg-orange-500/40' },
+                { label: 'DOGE Grants', count: stats.dogeGrantCount, color: 'bg-orange-400/30' },
+              ].map((item) => {
+                const maxCount = Math.max(stats.legislativeActionCount, stats.regulatoryActionCount, stats.dogeContractCount, stats.dogeGrantCount, 1);
+                const pct = Math.round((item.count / maxCount) * 100);
+                return (
+                  <div key={item.label} className="flex items-center gap-3">
+                    <span className="text-xs text-green-400 w-40 truncate">{item.label}</span>
+                    <div className="flex-1 h-2 bg-zinc-900 overflow-hidden">
+                      <div className={`h-full ${item.color}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs text-zinc-500 w-16 text-right">{item.count.toLocaleString()}</span>
+                  </div>
+                );
+              })}
+              {stats.legislativeActionCount + stats.regulatoryActionCount + stats.dogeContractCount + stats.dogeGrantCount === 0 && (
+                <div className="text-center text-zinc-600 text-sm py-4">No enrichment data yet</div>
               )}
             </div>
           </div>

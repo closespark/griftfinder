@@ -10,6 +10,7 @@ const links = [
   { href: '/investigations', label: 'INVESTIGATIONS' },
   { href: '/network', label: 'NETWORK' },
   { href: '/search', label: 'SEARCH' },
+  { href: '/doge', label: 'DOGE' },
   { href: '/analysis', label: 'ANALYSIS' },
 ];
 

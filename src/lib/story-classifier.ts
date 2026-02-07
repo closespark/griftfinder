@@ -13,7 +13,7 @@
  *   8. INVESTIGATION_FINDINGS — MMIX investigation with significant findings
  */
 
-import type { Signal, MmixEntry, Entity, Relationship, FecDisbursement, ScreeningResult } from './supabase/queries';
+import type { Signal, MmixEntry, Entity, Relationship, FecDisbursement, ScreeningResult, LegislativeAction, DogeContract, RegulatoryAction } from './supabase/queries';
 
 export interface ClassifiedStory {
   id: string;
@@ -37,6 +37,9 @@ interface ClassificationInput {
   disbursements: FecDisbursement[];
   screenings: ScreeningResult[];
   kbNodes: Record<string, unknown>[];
+  legislativeActions?: LegislativeAction[];
+  dogeContracts?: DogeContract[];
+  regulatoryActions?: RegulatoryAction[];
 }
 
 function formatMoney(n: number): string {
@@ -76,6 +79,12 @@ export function classifyStories(data: ClassificationInput): ClassifiedStory[] {
 
   // ─── 8. INVESTIGATION FINDINGS — MMIX investigations with significant findings across sources ───
   detectInvestigationStories(data, entityName, stories);
+
+  // ─── 9. LEGISLATION MONEY LOOP — politicians sponsoring bills while campaign funds flow to connected entities ───
+  detectLegislationMoneyLoop(data, entityName, stories);
+
+  // ─── 10. DOGE AGENCY OVERLAP — politicians legislating in areas where DOGE terminated contracts ───
+  detectDogeAgencyOverlap(data, entityName, stories);
 
   // Fallback: when we have data but no pattern matched, show one INFO story so the page isn't empty
   if (stories.length === 0 && (data.disbursements.length > 0 || data.entities.length > 0 || data.signals.length > 0)) {
@@ -566,6 +575,136 @@ function detectInvestigationStories(
   }
 }
 
+function detectLegislationMoneyLoop(
+  data: ClassificationInput,
+  entityName: (id: string) => string,
+  stories: ClassifiedStory[],
+) {
+  const legActions = data.legislativeActions || [];
+  if (legActions.length === 0 || data.disbursements.length === 0) return;
+
+  // Group legislative actions by entity_id
+  const legByEntity = new Map<string, LegislativeAction[]>();
+  for (const la of legActions) {
+    if (!la.entity_id) continue;
+    if (!legByEntity.has(la.entity_id)) legByEntity.set(la.entity_id, []);
+    legByEntity.get(la.entity_id)!.push(la);
+  }
+
+  // Group disbursements by entity_id
+  const disbByEntity = new Map<string, FecDisbursement[]>();
+  for (const d of data.disbursements) {
+    if (!d.entity_id) continue;
+    if (!disbByEntity.has(d.entity_id)) disbByEntity.set(d.entity_id, []);
+    disbByEntity.get(d.entity_id)!.push(d);
+  }
+
+  // Find politicians who both sponsor bills and have significant disbursements
+  for (const [eid, bills] of legByEntity) {
+    const disbs = disbByEntity.get(eid);
+    if (!disbs || disbs.length === 0) continue;
+
+    const totalDisb = disbs.reduce((s, d) => s + (d.disbursement_amount || 0), 0);
+    if (totalDisb < 50_000) continue;
+
+    const sponsoredBills = bills.filter((b) => b.sponsor_role === 'sponsor');
+    if (sponsoredBills.length === 0) continue;
+
+    const policyAreas = [...new Set(sponsoredBills.map((b) => b.policy_area).filter(Boolean))];
+    const name = entityName(eid);
+    const topRecipients = [...new Map(
+      disbs.map((d) => [d.recipient_name, d.disbursement_amount || 0])
+    ).entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+    stories.push({
+      id: `legmoney-${eid}`,
+      pattern: 'LEGISLATION_MONEY_LOOP',
+      severity: totalDisb >= 200_000 && sponsoredBills.length >= 3 ? 'high' : 'medium',
+      headline: `${name} sponsored ${sponsoredBills.length} bills while ${formatMoney(totalDisb)} flowed through campaign accounts`,
+      narrative: `${name} sponsored ${sponsoredBills.length} pieces of legislation${policyAreas.length > 0 ? ` in areas including ${policyAreas.join(', ')}` : ''} while their campaign disbursed ${formatMoney(totalDisb)} across ${disbs.length} payments. Top recipients: ${topRecipients.map(([r, a]) => `${r} (${formatMoney(a)})`).join(', ')}. This pattern can indicate a legislation-money feedback loop where campaign vendors benefit from the legislator's policy positions.`,
+      entities: [
+        { id: eid, name, role: 'Legislator / campaign disburser' },
+        ...topRecipients.slice(0, 3).map(([r]) => ({ id: '', name: r, role: 'Campaign fund recipient' })),
+      ],
+      evidence: [
+        { type: 'Legislative Actions', description: `${sponsoredBills.length} sponsored bills` },
+        { type: 'FEC Disbursements', description: `${disbs.length} payments totaling ${formatMoney(totalDisb)}` },
+      ],
+      totalMoney: totalDisb,
+      date: sponsoredBills[0]?.latest_action_date || '',
+      networkSize: topRecipients.length + 1,
+      sourceCount: 2,
+    });
+  }
+}
+
+function detectDogeAgencyOverlap(
+  data: ClassificationInput,
+  entityName: (id: string) => string,
+  stories: ClassifiedStory[],
+) {
+  const legActions = data.legislativeActions || [];
+  const contracts = data.dogeContracts || [];
+  if (legActions.length === 0 || contracts.length === 0) return;
+
+  // Build a set of DOGE agencies
+  const dogeAgencies = new Set(contracts.map((c) => c.agency?.toLowerCase()).filter(Boolean));
+
+  // Group legislative actions by entity_id
+  const legByEntity = new Map<string, LegislativeAction[]>();
+  for (const la of legActions) {
+    if (!la.entity_id) continue;
+    if (!legByEntity.has(la.entity_id)) legByEntity.set(la.entity_id, []);
+    legByEntity.get(la.entity_id)!.push(la);
+  }
+
+  // For each legislator, check if any of their bills' policy areas or titles mention DOGE agencies
+  for (const [eid, bills] of legByEntity) {
+    const matchingBills: LegislativeAction[] = [];
+    const matchedAgencies = new Set<string>();
+
+    for (const bill of bills) {
+      const titleLower = (bill.title || '').toLowerCase();
+      const policyLower = (bill.policy_area || '').toLowerCase();
+      for (const agency of dogeAgencies) {
+        if (agency && (titleLower.includes(agency) || policyLower.includes(agency))) {
+          matchingBills.push(bill);
+          matchedAgencies.add(agency);
+          break;
+        }
+      }
+    }
+
+    if (matchingBills.length === 0) continue;
+
+    const agencyContracts = contracts.filter((c) =>
+      matchedAgencies.has(c.agency?.toLowerCase() || '')
+    );
+    const totalContractValue = agencyContracts.reduce((s, c) => s + (c.contract_value || 0), 0);
+    const totalSavings = agencyContracts.reduce((s, c) => s + (c.savings_claimed || 0), 0);
+    const name = entityName(eid);
+
+    stories.push({
+      id: `dogeoverlap-${eid}`,
+      pattern: 'DOGE_AGENCY_OVERLAP',
+      severity: matchingBills.length >= 3 || totalContractValue >= 1_000_000 ? 'high' : 'medium',
+      headline: `${name} legislates in ${matchedAgencies.size} agency area(s) where DOGE terminated ${agencyContracts.length} contracts`,
+      narrative: `${name} introduced or cosponsored ${matchingBills.length} bill(s) touching agencies (${[...matchedAgencies].join(', ')}) where DOGE has terminated or modified ${agencyContracts.length} contracts worth ${formatMoney(totalContractValue)}${totalSavings > 0 ? ` (claimed savings: ${formatMoney(totalSavings)})` : ''}. This overlap warrants scrutiny — legislators may advocate for agencies whose contracts benefit their donors or political allies.`,
+      entities: [
+        { id: eid, name, role: 'Legislator with agency overlap' },
+      ],
+      evidence: [
+        { type: 'Legislative Bills', description: matchingBills.map((b) => `${b.bill_type} ${b.bill_number}: ${b.title}`).slice(0, 3).join('; ') },
+        { type: 'DOGE Contracts', description: `${agencyContracts.length} contracts worth ${formatMoney(totalContractValue)} at overlapping agencies` },
+      ],
+      totalMoney: totalContractValue,
+      date: matchingBills[0]?.latest_action_date || '',
+      networkSize: matchedAgencies.size + 1,
+      sourceCount: 2,
+    });
+  }
+}
+
 function formatSourceLabel(source: string): string {
   const map: Record<string, string> = {
     'fec': 'FEC Campaign Finance',
@@ -587,6 +726,10 @@ function formatSourceLabel(source: string): string {
     'federal_register': 'Federal Register',
     'LDA': 'Senate Lobbying',
     'web_search': 'Web Search / OSINT',
+    'congress_gov': 'Congress.gov',
+    'open_states': 'Open States',
+    'regulations_gov': 'Regulations.gov',
+    'doge_api': 'DOGE',
   };
   return map[source] || source.replace(/_/g, ' ');
 }
