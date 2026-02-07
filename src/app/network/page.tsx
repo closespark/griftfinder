@@ -25,6 +25,11 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
 
 export default function NetworkPage() {
   const svgRef = useRef<SVGSVGElement>(null);
+  const graphDataRef = useRef<{
+    nodes: GraphNode[];
+    links: GraphLink[];
+    vendorEntityCount: Map<string, Set<string>>;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [nodeCount, setNodeCount] = useState(0);
   const [edgeCount, setEdgeCount] = useState(0);
@@ -78,9 +83,12 @@ export default function NetworkPage() {
         const tgtId = `e:${r.target_entity_id}`;
         // Ensure both nodes exist
         if (!nodes.has(srcId)) {
+          const srcLabel =
+            entityNames.get(r.source_entity_id) ??
+            (r.source_entity_id != null ? String(r.source_entity_id).slice(0, 12) : 'Unknown');
           nodes.set(srcId, {
             id: srcId,
-            label: entityNames.get(r.source_entity_id) || r.source_entity_id.slice(0, 12),
+            label: srcLabel,
             type: 'entity',
             totalMoney: 0,
             entityId: r.source_entity_id,
@@ -88,9 +96,12 @@ export default function NetworkPage() {
           });
         }
         if (!nodes.has(tgtId)) {
+          const tgtLabel =
+            entityNames.get(r.target_entity_id) ??
+            (r.target_entity_id != null ? String(r.target_entity_id).slice(0, 12) : 'Unknown');
           nodes.set(tgtId, {
             id: tgtId,
-            label: entityNames.get(r.target_entity_id) || r.target_entity_id.slice(0, 12),
+            label: tgtLabel,
             type: 'entity',
             totalMoney: 0,
             entityId: r.target_entity_id,
@@ -152,9 +163,12 @@ export default function NetworkPage() {
 
         // Ensure entity node exists
         if (!nodes.has(entityNodeId)) {
+          const label =
+            entityNames.get(f.entityId) ??
+            (f.entityId != null ? String(f.entityId).slice(0, 12) : 'Unknown');
           nodes.set(entityNodeId, {
             id: entityNodeId,
-            label: entityNames.get(f.entityId) || f.entityId.slice(0, 12),
+            label,
             type: 'politician',
             totalMoney: 0,
             entityId: f.entityId,
@@ -267,13 +281,20 @@ export default function NetworkPage() {
       setNodeCount(finalNodes.length);
       setEdgeCount(finalLinks.length);
       setTotalMoney(totalFlow);
+      graphDataRef.current =
+        finalNodes.length > 0
+          ? { nodes: finalNodes, links: finalLinks, vendorEntityCount }
+          : null;
       setLoading(false);
-
-      if (!svgRef.current || finalNodes.length === 0) return;
-
-      renderGraph(svgRef.current, finalNodes, finalLinks, vendorEntityCount, setSelected, setSelectedLinks);
     });
   }, []);
+
+  // Render D3 graph after SVG is in the DOM (only mounts when loading is false)
+  useEffect(() => {
+    if (loading || !graphDataRef.current || !svgRef.current) return;
+    const { nodes, links, vendorEntityCount } = graphDataRef.current;
+    renderGraph(svgRef.current!, nodes, links, vendorEntityCount, setSelected, setSelectedLinks);
+  }, [loading]);
 
   return (
     <div className="mx-auto max-w-full px-4 py-8">
