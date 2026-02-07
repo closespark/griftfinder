@@ -126,21 +126,41 @@ export default function NetworkPage() {
       }
 
       // 3. Add disbursements as money flows
-      // Group by entity → vendor
-      const flowMap = new Map<string, { entityId: string; vendor: string; total: number; count: number; committees: Set<string> }>();
+      // Use entity_id when available, fall back to committee_id so no payments are orphaned.
+      // The source node is the politician/committee; the target is the vendor.
+      interface FlowInfo { sourceId: string; sourceType: 'entity' | 'committee'; sourceLabel: string; vendor: string; total: number; count: number; committees: Set<string> }
+      const flowMap = new Map<string, FlowInfo>();
 
       for (const d of disbursements) {
         if (!d.recipient_name || !d.disbursement_amount) continue;
-        // Skip disbursements not linked to any entity — avoids creating a giant "Unlinked" hub
-        if (!d.entity_id) continue;
 
         const vendorKey = d.recipient_name.toUpperCase().trim();
-        const entityId = d.entity_id;
-        const flowKey = `${entityId}→${vendorKey}`;
+        let sourceId: string;
+        let sourceType: 'entity' | 'committee';
+        let sourceLabel: string;
 
+        if (d.entity_id) {
+          sourceId = d.entity_id;
+          sourceType = 'entity';
+          sourceLabel = entityNames.get(d.entity_id) || d.candidate_name || d.committee_name || d.entity_id.slice(0, 12);
+        } else if (d.committee_id) {
+          sourceId = d.committee_id;
+          sourceType = 'committee';
+          sourceLabel = d.candidate_name || d.committee_name || d.committee_id;
+        } else if (d.committee_name) {
+          sourceId = d.committee_name.toUpperCase().trim();
+          sourceType = 'committee';
+          sourceLabel = d.candidate_name || d.committee_name;
+        } else {
+          continue; // truly unlinked — skip
+        }
+
+        const flowKey = `${sourceId}→${vendorKey}`;
         if (!flowMap.has(flowKey)) {
           flowMap.set(flowKey, {
-            entityId,
+            sourceId,
+            sourceType,
+            sourceLabel,
             vendor: d.recipient_name,
             total: 0,
             count: 0,
@@ -154,28 +174,29 @@ export default function NetworkPage() {
         totalFlow += d.disbursement_amount;
       }
 
-      // Count how many different entities pay each vendor
+      // Count how many different sources pay each vendor
       const vendorEntityCount = new Map<string, Set<string>>();
       for (const [, f] of flowMap) {
         const vk = f.vendor.toUpperCase().trim();
         if (!vendorEntityCount.has(vk)) vendorEntityCount.set(vk, new Set());
-        vendorEntityCount.get(vk)!.add(f.entityId);
+        vendorEntityCount.get(vk)!.add(f.sourceId);
       }
 
       // Add all flows to graph
       for (const [, f] of flowMap) {
         const vendorKey = f.vendor.toUpperCase().trim();
-        const entityNodeId = `e:${f.entityId}`;
+        // Source node: use entity prefix if entity, committee prefix if committee
+        const sourceNodeId = f.sourceType === 'entity' ? `e:${f.sourceId}` : `c:${f.sourceId}`;
         const vendorNodeId = `v:${vendorKey}`;
 
-        // Ensure entity node exists
-        if (!nodes.has(entityNodeId)) {
-          nodes.set(entityNodeId, {
-            id: entityNodeId,
-            label: entityNames.get(f.entityId) ?? String(f.entityId).slice(0, 12),
-            type: 'politician',
+        // Ensure source node exists
+        if (!nodes.has(sourceNodeId)) {
+          nodes.set(sourceNodeId, {
+            id: sourceNodeId,
+            label: f.sourceLabel,
+            type: f.sourceType === 'committee' ? 'committee' : 'politician',
             totalMoney: 0,
-            entityId: f.entityId,
+            entityId: f.sourceType === 'entity' ? f.sourceId : undefined,
             connections: 0,
           });
         }
@@ -192,17 +213,17 @@ export default function NetworkPage() {
           });
         }
 
-        nodes.get(entityNodeId)!.totalMoney += f.total;
-        nodes.get(entityNodeId)!.connections += 1;
+        nodes.get(sourceNodeId)!.totalMoney += f.total;
+        nodes.get(sourceNodeId)!.connections += 1;
         nodes.get(vendorNodeId)!.totalMoney += f.total;
 
-        const linkKey = `flow:${entityNodeId}→${vendorNodeId}`;
+        const linkKey = `flow:${sourceNodeId}→${vendorNodeId}`;
         if (linkMap.has(linkKey)) {
           linkMap.get(linkKey)!.amount += f.total;
           linkMap.get(linkKey)!.count += f.count;
         } else {
           linkMap.set(linkKey, {
-            source: entityNodeId,
+            source: sourceNodeId,
             target: vendorNodeId,
             amount: f.total,
             count: f.count,
@@ -245,9 +266,9 @@ export default function NetworkPage() {
       const finalLinks: GraphLink[] = [];
       const keepNodes = new Set<string>();
 
-      // Always keep entity nodes
-      for (const [id, node] of nodes) {
-        if (id.startsWith('e:')) keepNodes.add(id);
+      // Always keep entity and committee nodes
+      for (const [id] of nodes) {
+        if (id.startsWith('e:') || id.startsWith('c:')) keepNodes.add(id);
       }
 
       // Keep vendors with either: multiple connections, or significant money, or shared across entities
@@ -313,6 +334,9 @@ export default function NetworkPage() {
         <div className="mt-3 flex flex-wrap gap-4 text-xs">
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Politicians / Entities
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-purple-400" /> Committees
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-yellow-500" /> Vendors (shared)
@@ -450,6 +474,7 @@ function renderGraph(
       if (entityCount >= 2) return '#eab308'; // yellow — shared vendor
       return '#71717a'; // zinc — single vendor
     }
+    if (d.type === 'committee') return '#a78bfa'; // purple — committee
     return '#22c55e'; // green — politician/entity
   }
 
@@ -529,7 +554,7 @@ function renderGraph(
     .text((d) => d.label.length > 25 ? d.label.slice(0, 25) + '...' : d.label)
     .attr('font-size', 8)
     .attr('font-family', 'monospace')
-    .attr('fill', (d) => d.type === 'vendor' ? '#a1a1aa' : '#86efac')
+    .attr('fill', (d) => d.type === 'vendor' ? '#a1a1aa' : d.type === 'committee' ? '#c4b5fd' : '#86efac')
     .attr('text-anchor', 'middle')
     .attr('dy', (d) => -nodeRadius(d) - 4);
 

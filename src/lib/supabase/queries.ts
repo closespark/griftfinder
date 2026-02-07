@@ -350,7 +350,7 @@ export async function getMoneyNetwork() {
   while (true) {
     const { data: page } = await supabase
       .from('fec_disbursements')
-      .select('entity_id, recipient_name, disbursement_amount, committee_name, committee_id')
+      .select('entity_id, recipient_name, disbursement_amount, committee_name, committee_id, candidate_name')
       .range(offset, offset + pageSize - 1);
     if (!page || page.length === 0) break;
     allDisbursements.push(...(page as FecDisbursement[]));
