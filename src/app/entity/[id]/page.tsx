@@ -10,6 +10,18 @@ import {
   type Entity, type Signal, type MmixEntry, type Relationship, type FecDisbursement, type ScreeningResult,
 } from '@/lib/supabase/queries';
 
+function formatMoney(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
+  return `$${n.toLocaleString()}`;
+}
+
+function signalDescription(sig: Signal): string {
+  const d = sig.details as Record<string, unknown>;
+  if (d?.description) return String(d.description);
+  return sig.signal_type.replace(/_/g, ' ').toLowerCase();
+}
+
 export default function EntityDossierPage() {
   const { id } = useParams<{ id: string }>();
   const [entity, setEntity] = useState<Entity | null>(null);
@@ -54,178 +66,240 @@ export default function EntityDossierPage() {
   if (loading) return <div className="mx-auto max-w-6xl px-4 py-8 text-green-400/50 animate-pulse">Loading dossier...</div>;
   if (!entity) return <div className="mx-auto max-w-6xl px-4 py-8 text-zinc-600">Entity not found. <Link href="/entities" className="text-green-400 underline">Back to entities</Link></div>;
 
-  const totalMoney = disbursements.reduce((sum, d) => sum + (d.disbursement_amount || 0), 0);
-
-  // Get findings from all investigations for this entity
+  const totalSpending = disbursements.reduce((sum, d) => sum + (d.disbursement_amount || 0), 0);
+  const totalAwards = awards.reduce((sum, a) => sum + Number((a as Record<string, unknown>).total_obligation || 0), 0);
   const allFindings = investigations.flatMap((inv) => inv.findings || []);
+  const highStrengthSignals = signals.filter((s) => s.strength >= 0.7);
+
+  // Group disbursements by recipient for the money flow view
+  const vendorTotals = disbursements.reduce<Record<string, { total: number; count: number; committees: Set<string> }>>((acc, d) => {
+    const v = d.recipient_name || 'Unknown';
+    if (!acc[v]) acc[v] = { total: 0, count: 0, committees: new Set() };
+    acc[v].total += d.disbursement_amount || 0;
+    acc[v].count += 1;
+    if (d.committee_name) acc[v].committees.add(d.committee_name);
+    return acc;
+  }, {});
+  const topVendors = Object.entries(vendorTotals)
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 15);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
       {/* Header */}
-      <div className="border-b border-green-500/20 pb-4 mb-6">
+      <div className="border-b border-green-500/20 pb-6 mb-6">
         <div className="flex items-center gap-2 text-xs text-zinc-600 mb-2">
           <Link href="/entities" className="hover:text-green-400">ENTITIES</Link>
           <span>/</span>
-          <span className="text-green-500/70">{entity.entity_type}</span>
+          <span className="text-green-500/50">{entity.entity_type}</span>
         </div>
         <h1 className="text-3xl font-bold text-white">{entity.canonical_name}</h1>
         {entity.aliases && entity.aliases.length > 0 && (
-          <p className="mt-1 text-sm text-zinc-600">
+          <p className="mt-1 text-sm text-zinc-500">
             Also known as: {entity.aliases.join(', ')}
           </p>
         )}
+
+        {/* Quick summary line */}
+        <div className="mt-4 flex flex-wrap gap-3 text-xs">
+          {highStrengthSignals.length > 0 && (
+            <span className="px-2 py-1 bg-red-950/20 border border-red-500/30 text-red-400">
+              {highStrengthSignals.length} high-priority anomalies
+            </span>
+          )}
+          {totalSpending > 0 && (
+            <span className="px-2 py-1 bg-green-950/20 border border-green-500/20 text-green-400">
+              {formatMoney(totalSpending)} in FEC disbursements
+            </span>
+          )}
+          {totalAwards > 0 && (
+            <span className="px-2 py-1 bg-green-950/20 border border-green-500/20 text-green-400">
+              {formatMoney(totalAwards)} in federal contracts
+            </span>
+          )}
+          {courtCases.length > 0 && (
+            <span className="px-2 py-1 bg-yellow-950/20 border border-yellow-500/20 text-yellow-400">
+              {courtCases.length} court records
+            </span>
+          )}
+          {screenings.length > 0 && (
+            <span className="px-2 py-1 bg-red-950/20 border border-red-500/20 text-red-400">
+              {screenings.length} screening matches
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Quick stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 mb-6">
-        {[
-          { label: 'SIGNALS', value: signals.length },
-          { label: 'INVESTIGATIONS', value: investigations.length },
-          { label: 'FEC RECORDS', value: disbursements.length },
-          { label: 'RELATIONSHIPS', value: relationships.length },
-          { label: 'FEC TOTAL', value: `$${(totalMoney / 1000).toFixed(0)}k` },
-        ].map((s) => (
-          <div key={s.label} className="border border-green-500/20 bg-green-950/10 p-3">
-            <div className="text-xs text-green-500/60">{s.label}</div>
-            <div className="mt-0.5 text-xl font-bold text-green-400">{s.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Investigation findings */}
+      {/* Investigation findings — the headline content */}
       {allFindings.length > 0 && (
-        <Section title="INVESTIGATION FINDINGS" count={allFindings.length}>
-          {allFindings.map((f, i) => (
-            <div key={i} className="px-4 py-3 border-b border-green-500/10 last:border-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs px-2 py-0.5 bg-green-950/40 text-green-500/70 border border-green-500/20">
-                  {f.source}
-                </span>
+        <Section title="WHAT WE FOUND" count={allFindings.length}>
+          <div className="divide-y divide-green-500/10">
+            {allFindings.map((f, i) => (
+              <div key={i} className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs px-2 py-0.5 bg-green-950/30 text-green-500/80 border border-green-500/20 uppercase">
+                    {formatSource(f.source)}
+                  </span>
+                </div>
+                <p className="text-sm text-zinc-300">{f.summary}</p>
+                {f.detail && renderFindingDetail(f.source, f.detail)}
               </div>
-              <p className="mt-1 text-sm text-zinc-400">{f.summary}</p>
-            </div>
-          ))}
-        </Section>
-      )}
-
-      {/* Signals */}
-      {signals.length > 0 && (
-        <Section title="SIGNALS" count={signals.length}>
-          {signals.slice(0, 20).map((sig) => (
-            <div key={sig.id} className="px-4 py-2 border-b border-green-500/10 last:border-0 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${
-                  sig.strength >= 0.8 ? 'bg-red-500' : sig.strength >= 0.5 ? 'bg-yellow-500' : 'bg-green-500'
-                }`} />
-                <span className="text-xs text-green-400">{sig.signal_type}</span>
-                <span className="text-xs text-zinc-600">{(sig.details as Record<string, string>)?.description?.slice(0, 80)}</span>
-              </div>
-              <div className="text-xs text-zinc-600">{sig.strength.toFixed(1)}</div>
-            </div>
-          ))}
-        </Section>
-      )}
-
-      {/* FEC Disbursements */}
-      {disbursements.length > 0 && (
-        <Section title="FEC DISBURSEMENTS" count={disbursements.length}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-green-500/60 text-left border-b border-green-500/20">
-                  <th className="px-4 py-2">RECIPIENT</th>
-                  <th className="px-4 py-2">AMOUNT</th>
-                  <th className="px-4 py-2">COMMITTEE</th>
-                  <th className="px-4 py-2">DATE</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-green-500/10">
-                {disbursements.slice(0, 30).map((d) => (
-                  <tr key={d.id} className="text-zinc-400">
-                    <td className="px-4 py-2 text-green-400">{d.recipient_name}</td>
-                    <td className="px-4 py-2">${d.disbursement_amount?.toLocaleString()}</td>
-                    <td className="px-4 py-2 text-zinc-600">{d.committee_name}</td>
-                    <td className="px-4 py-2 text-zinc-600">{d.disbursement_date}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            ))}
           </div>
         </Section>
       )}
 
-      {/* Screenings (OFAC, LDA) */}
-      {screenings.length > 0 && (
-        <Section title="SCREENING RESULTS" count={screenings.length}>
-          {screenings.map((s, i) => (
-            <div key={i} className="px-4 py-3 border-b border-green-500/10 last:border-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs px-2 py-0.5 bg-red-950/30 text-red-400 border border-red-500/20">
-                  {s.source || s.list_name}
-                </span>
-                <span className="text-xs text-zinc-500">{s.match_type}</span>
+      {/* Anomalies / Signals — readable */}
+      {signals.length > 0 && (
+        <Section title="DETECTED ANOMALIES" count={signals.length}>
+          <div className="divide-y divide-green-500/10">
+            {signals.slice(0, 25).map((sig) => (
+              <div key={sig.id} className={`px-5 py-3 border-l-2 ${
+                sig.strength >= 0.8 ? 'border-l-red-500/50' : sig.strength >= 0.5 ? 'border-l-yellow-500/40' : 'border-l-green-500/30'
+              }`}>
+                <p className="text-sm text-zinc-300">{signalDescription(sig)}</p>
+                <div className="mt-1 flex items-center gap-3 text-xs text-zinc-600">
+                  <span>Strength: {(sig.strength * 100).toFixed(0)}%</span>
+                  <span>{new Date(sig.detected_at).toLocaleDateString()}</span>
+                  <span className="text-zinc-700">{sig.source_api}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </Section>
       )}
 
-      {/* Corporate Filings */}
+      {/* Money flow — where the money goes */}
+      {topVendors.length > 0 && (
+        <Section title="WHERE THE MONEY GOES" count={disbursements.length + ' payments'}>
+          <div className="p-4 space-y-2">
+            {topVendors.map(([vendor, info]) => {
+              const pct = Math.round((info.total / topVendors[0][1].total) * 100);
+              return (
+                <div key={vendor} className="flex items-center gap-3">
+                  <span className="text-xs text-green-400 w-48 truncate" title={vendor}>{vendor}</span>
+                  <div className="flex-1 h-3 bg-zinc-900 overflow-hidden">
+                    <div className="h-full bg-green-500/30" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-xs text-zinc-400 w-20 text-right">{formatMoney(info.total)}</span>
+                  <span className="text-xs text-zinc-600 w-16 text-right">{info.count} pmt{info.count > 1 ? 's' : ''}</span>
+                </div>
+              );
+            })}
+          </div>
+          {disbursements.length > 15 && (
+            <div className="px-4 pb-3 text-xs text-zinc-600">
+              Showing top 15 of {disbursements.length} disbursement recipients
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* Screenings — OFAC, LDA, etc. */}
+      {screenings.length > 0 && (
+        <Section title="SCREENING ALERTS" count={screenings.length}>
+          <div className="divide-y divide-green-500/10">
+            {screenings.map((s, i) => (
+              <div key={i} className="px-5 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs px-2 py-0.5 bg-red-950/30 text-red-400 border border-red-500/20">
+                    {s.list_name || s.source}
+                  </span>
+                  <span className="text-xs text-zinc-500">{s.match_type}</span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500">{s.entity_name}</p>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Corporate / Regulatory Filings */}
       {filings.length > 0 && (
         <Section title="CORPORATE & REGULATORY FILINGS" count={filings.length}>
-          {filings.map((f, i) => (
-            <div key={i} className="px-4 py-2 border-b border-green-500/10 last:border-0 text-xs text-zinc-400">
-              <span className="text-green-500/70">[{(f as Record<string, string>).filing_type || 'Filing'}]</span>{' '}
-              {(f as Record<string, string>).entity_name}
-            </div>
-          ))}
+          <div className="divide-y divide-green-500/10">
+            {filings.map((f, i) => {
+              const r = f as Record<string, string>;
+              return (
+                <div key={i} className="px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-0.5 bg-green-950/30 text-green-500/70 border border-green-500/20">
+                      {r.filing_type || 'Filing'}
+                    </span>
+                    {r.jurisdiction && <span className="text-xs text-zinc-600">{r.jurisdiction}</span>}
+                  </div>
+                  <p className="mt-1 text-sm text-zinc-400">{r.entity_name}</p>
+                </div>
+              );
+            })}
+          </div>
         </Section>
       )}
 
       {/* Court Cases */}
       {courtCases.length > 0 && (
-        <Section title="COURT CASES" count={courtCases.length}>
-          {courtCases.map((c, i) => (
-            <div key={i} className="px-4 py-2 border-b border-green-500/10 last:border-0 text-xs text-zinc-400">
-              {(c as Record<string, string>).case_name || (c as Record<string, string>).entity_name || 'Case'}
-            </div>
-          ))}
+        <Section title="COURT RECORDS" count={courtCases.length}>
+          <div className="divide-y divide-green-500/10">
+            {courtCases.map((c, i) => {
+              const r = c as Record<string, string>;
+              return (
+                <div key={i} className="px-5 py-3">
+                  <p className="text-sm text-zinc-300">{r.case_name || r.entity_name || 'Case record'}</p>
+                  {r.court_name && <p className="text-xs text-zinc-600 mt-1">{r.court_name}</p>}
+                </div>
+              );
+            })}
+          </div>
         </Section>
       )}
 
       {/* Federal Awards */}
       {awards.length > 0 && (
-        <Section title="FEDERAL AWARDS & CONTRACTS" count={awards.length}>
-          {awards.map((a, i) => (
-            <div key={i} className="px-4 py-2 border-b border-green-500/10 last:border-0 text-xs text-zinc-400">
-              {(a as Record<string, string>).award_description || (a as Record<string, string>).entity_name || 'Award'}
-            </div>
-          ))}
+        <Section title="FEDERAL CONTRACTS & AWARDS" count={awards.length}>
+          <div className="divide-y divide-green-500/10">
+            {awards.map((a, i) => {
+              const r = a as Record<string, unknown>;
+              return (
+                <div key={i} className="px-5 py-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-zinc-300">{String(r.award_description || r.recipient_name || r.entity_name || 'Award')}</p>
+                    {Number(r.total_obligation) > 0 && (
+                      <span className="text-sm font-semibold text-green-400">{formatMoney(Number(r.total_obligation))}</span>
+                    )}
+                  </div>
+                  {r.awarding_agency ? <p className="text-xs text-zinc-600 mt-1">Agency: {String(r.awarding_agency)}</p> : null}
+                </div>
+              );
+            })}
+          </div>
         </Section>
       )}
 
       {/* Relationships */}
       {relationships.length > 0 && (
-        <Section title="RELATIONSHIPS" count={relationships.length}>
-          {relationships.map((r) => (
-            <div key={r.id} className="px-4 py-2 border-b border-green-500/10 last:border-0 flex items-center gap-2 text-xs">
-              <span className="text-green-500/50">{r.relationship_type}</span>
-              <span className="text-zinc-500">→</span>
-              <Link
-                href={`/entity/${r.source_entity_id === id ? r.target_entity_id : r.source_entity_id}`}
-                className="text-green-400 hover:underline"
-              >
-                {r.source_entity_id === id ? r.target_entity_id.slice(0, 12) : r.source_entity_id.slice(0, 12)}...
-              </Link>
-            </div>
-          ))}
+        <Section title="CONNECTIONS" count={relationships.length}>
+          <div className="divide-y divide-green-500/10">
+            {relationships.map((r) => (
+              <div key={r.id} className="px-5 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-green-500/60 uppercase">{r.relationship_type.replace(/_/g, ' ')}</span>
+                  <Link
+                    href={`/entity/${r.source_entity_id === id ? r.target_entity_id : r.source_entity_id}`}
+                    className="text-sm text-green-400 hover:underline"
+                  >
+                    {r.source_entity_id === id ? r.target_entity_id.slice(0, 12) : r.source_entity_id.slice(0, 12)}...
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
         </Section>
       )}
     </div>
   );
 }
 
-function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+function Section({ title, count, children }: { title: string; count: number | string; children: React.ReactNode }) {
   return (
     <div className="mb-6 border border-green-500/20">
       <div className="border-b border-green-500/20 bg-green-950/20 px-4 py-2 flex items-center justify-between">
@@ -235,4 +309,82 @@ function Section({ title, count, children }: { title: string; count: number; chi
       {children}
     </div>
   );
+}
+
+function formatSource(source: string): string {
+  const map: Record<string, string> = {
+    'fec': 'FEC Campaign Finance',
+    'courtlistener': 'Court Records',
+    'usaspending': 'Federal Contracts',
+    'usaspending_grants': 'Federal Grants',
+    'propublica_990': 'Nonprofit Tax Returns',
+    'sec_edgar': 'SEC Filings',
+    'opencorporates': 'Corporate Registry',
+    'sam_gov': 'SAM.gov Registrations',
+    'house_disclosures': 'Financial Disclosures',
+    'irs_exempt_orgs': 'IRS Exempt Orgs',
+    'wikidata_family': 'Family Connections',
+    'Senate LDA': 'Senate Lobbying',
+    'OFAC SDN': 'OFAC Sanctions',
+    'Federal Register': 'Federal Register',
+    'senate_lda': 'Senate Lobbying',
+    'opensanctions': 'OFAC Sanctions',
+    'federal_register': 'Federal Register',
+    'LDA': 'Senate Lobbying',
+  };
+  return map[source] || source.replace(/_/g, ' ');
+}
+
+function renderFindingDetail(source: string, detail: Record<string, unknown>): React.ReactNode {
+  // LDA lobbying — show revolving door lobbyists
+  if ((source === 'Senate LDA' || source === 'senate_lda') && detail?.revolving_door_lobbyists) {
+    const lobbyists = detail.revolving_door_lobbyists as Array<{ name: string; covered_position: string }>;
+    if (lobbyists.length > 0) {
+      return (
+        <div className="mt-2 space-y-1">
+          <p className="text-xs text-yellow-400/80">Revolving door lobbyists:</p>
+          {lobbyists.slice(0, 5).map((l, i) => (
+            <p key={i} className="text-xs text-zinc-500 pl-3">
+              {l.name} — <span className="text-yellow-400/60">formerly: {l.covered_position}</span>
+            </p>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  // Federal Register — show document titles
+  if (source === 'Federal Register' || source === 'federal_register') {
+    const docs = detail.documents as Array<{ title: string; type: string; agencies: string[]; html_url: string }>;
+    if (docs?.length > 0) {
+      return (
+        <div className="mt-2 space-y-1">
+          {docs.slice(0, 3).map((d, i) => (
+            <p key={i} className="text-xs text-zinc-500 pl-3">
+              [{d.type}] {d.title}
+              {d.agencies?.length > 0 && <span className="text-zinc-600"> — {d.agencies.join(', ')}</span>}
+            </p>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  // SEC filings
+  if (source === 'sec_edgar' && detail?.filings) {
+    const filings = detail.filings as Array<{ form_type: string; company_name: string; date_filed: string }>;
+    if (filings?.length > 0) {
+      return (
+        <div className="mt-2 space-y-1">
+          {filings.slice(0, 5).map((f, i) => (
+            <p key={i} className="text-xs text-zinc-500 pl-3">
+              [{f.form_type}] {f.company_name} — filed {f.date_filed}
+            </p>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  return null;
 }

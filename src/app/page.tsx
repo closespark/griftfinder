@@ -5,6 +5,30 @@ import Link from 'next/link';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
 import { getDashboardStats, getActiveInvestigations, getRecentSignals, getUniverseStats, type MmixEntry, type Signal } from '@/lib/supabase/queries';
 
+function formatSignal(sig: Signal): string {
+  const d = sig.details as Record<string, unknown>;
+  if (d?.description) return String(d.description);
+  const type = sig.signal_type || '';
+  if (type === 'FEC_LARGE_PAYMENT') return `Large payment: $${Number(d?.amount || 0).toLocaleString()} to ${d?.recipient || 'unknown'}`;
+  if (type === 'FEC_SPOUSE_PAYMENT') return `Spouse-connected payment: $${Number(d?.amount || 0).toLocaleString()} to ${d?.recipient || 'unknown'}`;
+  if (type === 'FEC_HIGH_VOLUME') return `High-volume vendor: $${Number(d?.total_amount || 0).toLocaleString()} across ${d?.payment_count || '?'} payments`;
+  if (type === 'CROSS_CAMPAIGN') return `Cross-campaign: ${d?.vendor || 'vendor'} paid by multiple committees`;
+  if (type === 'CONNECTION') return `Network connection detected`;
+  return type.replace(/_/g, ' ').toLowerCase();
+}
+
+function signalColor(sig: Signal): string {
+  if (sig.strength >= 0.8) return 'border-red-500/30 bg-red-950/10';
+  if (sig.strength >= 0.5) return 'border-yellow-500/20 bg-yellow-950/10';
+  return 'border-green-500/20 bg-green-950/10';
+}
+
+function signalDot(sig: Signal): string {
+  if (sig.strength >= 0.8) return 'bg-red-500';
+  if (sig.strength >= 0.5) return 'bg-yellow-500';
+  return 'bg-green-500';
+}
+
 export default function Home() {
   const [stats, setStats] = useState({ entityCount: 0, signalCount: 0, activeInvestigations: 0, publishedStories: 0 });
   const [universe, setUniverse] = useState({ total: 0 });
@@ -18,7 +42,7 @@ export default function Home() {
       getDashboardStats(),
       getUniverseStats(),
       getActiveInvestigations(),
-      getRecentSignals(10),
+      getRecentSignals(15),
     ]).then(([s, u, inv, sig]) => {
       setStats(s);
       setUniverse(u);
@@ -39,7 +63,8 @@ export default function Home() {
         </p>
         <p className="mt-4 max-w-2xl text-sm leading-relaxed text-zinc-600">
           An autonomous investigation system scanning {universe.total.toLocaleString()} politicians
-          across 19 federal databases. Ralph never sleeps.
+          across 19 federal databases — FEC filings, lobbying disclosures, OFAC sanctions, SEC filings,
+          court records, federal contracts, and more. Ralph never sleeps.
         </p>
       </div>
 
@@ -54,9 +79,9 @@ export default function Home() {
           {/* Stats row */}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-8">
             {[
-              { label: 'ENTITIES TRACKED', value: stats.entityCount },
-              { label: 'SIGNALS DETECTED', value: stats.signalCount },
-              { label: 'ACTIVE INVESTIGATIONS', value: stats.activeInvestigations },
+              { label: 'POLITICIANS SCANNED', value: universe.total },
+              { label: 'ANOMALIES DETECTED', value: stats.signalCount },
+              { label: 'UNDER INVESTIGATION', value: stats.activeInvestigations },
               { label: 'STORIES PUBLISHED', value: stats.publishedStories },
             ].map((s) => (
               <div key={s.label} className="border border-green-500/20 bg-green-950/10 p-4">
@@ -66,54 +91,63 @@ export default function Home() {
             ))}
           </div>
 
-          {/* Two columns: Investigations + Signal feed */}
+          {/* Two columns */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Active Investigations */}
+            {/* Currently Investigating */}
             <div className="border border-green-500/20">
               <div className="border-b border-green-500/20 bg-green-950/20 px-4 py-2 flex items-center justify-between">
-                <span className="text-xs text-green-500/70">ACTIVE INVESTIGATIONS</span>
+                <span className="text-xs text-green-500/70">CURRENTLY INVESTIGATING</span>
                 <Link href="/investigations" className="text-xs text-green-500/50 hover:text-green-400">View all</Link>
               </div>
               <div className="divide-y divide-green-500/10">
-                {investigations.slice(0, 5).map((inv) => (
-                  <Link key={inv.id} href={`/entity/${inv.entity_id}`} className="block px-4 py-3 hover:bg-green-950/20 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-green-400">{inv.entity_name || inv.entity_id.slice(0, 12)}</span>
-                      <span className="text-xs text-green-500/50">P{inv.priority}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-zinc-600">
-                      {(inv.findings || []).length} findings | {(inv.sources_remaining || []).length} sources left
-                    </div>
-                  </Link>
-                ))}
+                {investigations.slice(0, 5).map((inv) => {
+                  const findings = inv.findings || [];
+                  const topFinding = findings[findings.length - 1];
+                  return (
+                    <Link key={inv.id} href={`/entity/${inv.entity_id}`} className="block px-4 py-3 hover:bg-green-950/20 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-green-400 font-semibold">{inv.entity_name || 'Unknown'}</span>
+                        <span className="text-xs text-zinc-600">{findings.length} findings</span>
+                      </div>
+                      {inv.thesis && (
+                        <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{inv.thesis}</p>
+                      )}
+                      {topFinding && (
+                        <p className="mt-1 text-xs text-zinc-600 italic line-clamp-1">
+                          Latest: {topFinding.summary}
+                        </p>
+                      )}
+                    </Link>
+                  );
+                })}
                 {investigations.length === 0 && (
                   <div className="px-4 py-6 text-center text-zinc-600 text-sm">No active investigations</div>
                 )}
               </div>
             </div>
 
-            {/* Signal feed */}
+            {/* Recent anomalies detected */}
             <div className="border border-green-500/20">
               <div className="border-b border-green-500/20 bg-green-950/20 px-4 py-2 flex items-center justify-between">
-                <span className="text-xs text-green-500/70">LATEST SIGNALS</span>
-                <Link href="/analysis" className="text-xs text-green-500/50 hover:text-green-400">Analysis</Link>
+                <span className="text-xs text-green-500/70">RECENT ANOMALIES</span>
+                <Link href="/analysis" className="text-xs text-green-500/50 hover:text-green-400">Full analysis</Link>
               </div>
               <div className="divide-y divide-green-500/10">
                 {signals.map((sig) => (
-                  <div key={sig.id} className="px-4 py-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className={`h-1.5 w-1.5 rounded-full ${
-                        sig.strength >= 0.8 ? 'bg-red-500' : sig.strength >= 0.5 ? 'bg-yellow-500' : 'bg-green-500'
-                      }`} />
-                      <span className="text-xs text-green-400">{sig.signal_type}</span>
+                  <div key={sig.id} className={`px-4 py-2.5 border-l-2 ${signalColor(sig)}`}>
+                    <div className="flex items-start gap-2">
+                      <span className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${signalDot(sig)}`} />
+                      <div className="min-w-0">
+                        <p className="text-xs text-zinc-300 line-clamp-2">{formatSignal(sig)}</p>
+                        <p className="mt-0.5 text-xs text-zinc-600">
+                          {new Date(sig.detected_at).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
-                    <span className="text-xs text-zinc-600">
-                      {new Date(sig.detected_at).toLocaleDateString()}
-                    </span>
                   </div>
                 ))}
                 {signals.length === 0 && (
-                  <div className="px-4 py-6 text-center text-zinc-600 text-sm">No signals yet</div>
+                  <div className="px-4 py-6 text-center text-zinc-600 text-sm">No anomalies yet</div>
                 )}
               </div>
             </div>
