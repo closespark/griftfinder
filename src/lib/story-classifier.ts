@@ -49,8 +49,8 @@ export function classifyStories(data: ClassificationInput): ClassifiedStory[] {
   const stories: ClassifiedStory[] = [];
   const entityMap = new Map(data.entities.map((e) => [e.id, e]));
 
-  function entityName(id: string): string {
-    return entityMap.get(id)?.canonical_name || id.slice(0, 12);
+  function entityName(id: string | null | undefined): string {
+    return entityMap.get(id ?? '')?.canonical_name ?? (id != null ? String(id).slice(0, 12) : 'Unknown');
   }
 
   // ─── 1. VENDOR SIPHONING — vendors paid by multiple campaigns ───
@@ -77,6 +77,28 @@ export function classifyStories(data: ClassificationInput): ClassifiedStory[] {
   // ─── 8. INVESTIGATION FINDINGS — MMIX investigations with significant findings across sources ───
   detectInvestigationStories(data, entityName, stories);
 
+  // Fallback: when we have data but no pattern matched, show one INFO story so the page isn't empty
+  if (stories.length === 0 && (data.disbursements.length > 0 || data.entities.length > 0 || data.signals.length > 0)) {
+    const totalDisb = data.disbursements.reduce((s, d) => s + (d.disbursement_amount || 0), 0);
+    stories.push({
+      id: 'data-loaded',
+      pattern: 'DATA_LOADED',
+      severity: 'info',
+      headline: 'Data loaded; no patterns above threshold yet',
+      narrative: `Ralph has loaded ${data.entities.length} entities, ${data.disbursements.length} disbursements (${formatMoney(totalDisb)}), and ${data.signals.length} signals. No high-confidence patterns matched yet. Link more entity_id to committees or add signals to surface vendor siphoning and cross-campaign networks.`,
+      entities: [],
+      evidence: [
+        { type: 'Entities', description: `${data.entities.length} entities` },
+        { type: 'Disbursements', description: `${data.disbursements.length} payments, ${formatMoney(totalDisb)} total` },
+        { type: 'Signals', description: `${data.signals.length} signals` },
+      ],
+      totalMoney: totalDisb,
+      date: '',
+      networkSize: 0,
+      sourceCount: 1,
+    });
+  }
+
   // Sort by severity then money
   const severityOrder = { critical: 0, high: 1, medium: 2, info: 3 };
   stories.sort((a, b) => {
@@ -95,20 +117,25 @@ function detectVendorSiphoning(
   entityName: (id: string) => string,
   stories: ClassifiedStory[],
 ) {
-  // Group disbursements by normalized vendor name
+  // Group disbursements by normalized vendor name; track both entity_id and committee_id so we can detect patterns even when entity_id is null
   const vendorMap = new Map<string, {
     total: number;
     entities: Map<string, { name: string; amount: number; committee: string }>;
+    committees: Map<string, { name: string; amount: number }>;
     disbursements: FecDisbursement[];
   }>();
 
+  const genericVendorNames = new Set(['AGENCY', 'UNKNOWN', 'N/A', 'NONE', 'UNKNOWN RECIPIENT', 'MISC', 'OTHER', '']);
   for (const d of data.disbursements) {
     const vendor = (d.recipient_name || '').toUpperCase().trim();
-    if (!vendor || vendor.length < 3) continue;
-    if (!vendorMap.has(vendor)) vendorMap.set(vendor, { total: 0, entities: new Map(), disbursements: [] });
+    if (!vendor || vendor.length < 3 || genericVendorNames.has(vendor)) continue;
+    if (!vendorMap.has(vendor)) vendorMap.set(vendor, { total: 0, entities: new Map(), committees: new Map(), disbursements: [] });
     const v = vendorMap.get(vendor)!;
     v.total += d.disbursement_amount || 0;
     v.disbursements.push(d);
+    const committeeKey = (d.committee_id || d.committee_name || '').trim() || 'unknown';
+    if (!v.committees.has(committeeKey)) v.committees.set(committeeKey, { name: d.committee_name || committeeKey, amount: 0 });
+    v.committees.get(committeeKey)!.amount += d.disbursement_amount || 0;
     if (d.entity_id && !v.entities.has(d.entity_id)) {
       v.entities.set(d.entity_id, {
         name: entityName(d.entity_id),
@@ -122,33 +149,60 @@ function detectVendorSiphoning(
     }
   }
 
-  // Flag vendors paid by 3+ distinct politicians
-  for (const [vendor, info] of vendorMap) {
-    if (info.entities.size < 3 || info.total < 50_000) continue;
-    const entityList = Array.from(info.entities.entries())
-      .sort((a, b) => b[1].amount - a[1].amount);
-    const topPayers = entityList.slice(0, 5);
+  const minTotal = 20_000;
+  const minPayers = 3;
 
-    stories.push({
-      id: `siphon-${vendor.slice(0, 20)}`,
-      pattern: 'VENDOR_SIPHONING',
-      severity: info.entities.size >= 5 ? 'critical' : info.total >= 200_000 ? 'high' : 'medium',
-      headline: `${vendor} received campaign funds from ${info.entities.size} different politicians`,
-      narrative: `The vendor "${vendor}" collected ${formatMoney(info.total)} in campaign disbursements from ${info.entities.size} separate political campaigns. The largest payers include ${topPayers.map(([, e]) => `${e.name} (${formatMoney(e.amount)} via ${e.committee})`).join(', ')}. When a single vendor is paid by this many campaigns, it can indicate a coordinated network funneling money to a common recipient.`,
-      entities: entityList.map(([id, e]) => ({
-        id,
-        name: e.name,
-        role: `Paid ${formatMoney(e.amount)} via ${e.committee}`,
-      })),
-      evidence: [
-        { type: 'FEC Disbursements', description: `${info.disbursements.length} payments totaling ${formatMoney(info.total)}` },
-        { type: 'Network Size', description: `${info.entities.size} distinct political campaigns involved` },
-      ],
-      totalMoney: info.total,
-      date: info.disbursements.sort((a, b) => b.disbursement_date?.localeCompare(a.disbursement_date || '') || 0)[0]?.disbursement_date || '',
-      networkSize: info.entities.size,
-      sourceCount: 1,
-    });
+  for (const [vendor, info] of vendorMap) {
+    const entityList = Array.from(info.entities.entries()).sort((a, b) => b[1].amount - a[1].amount);
+    const committeeList = Array.from(info.committees.entries()).sort((a, b) => b[1].amount - a[1].amount);
+    const useEntities = info.entities.size >= minPayers && info.total >= 50_000;
+    const useCommittees = !useEntities && info.committees.size >= minPayers && info.total >= minTotal;
+
+    if (useEntities) {
+      const topPayers = entityList.slice(0, 5);
+      stories.push({
+        id: `siphon-${vendor.slice(0, 20)}`,
+        pattern: 'VENDOR_SIPHONING',
+        severity: info.entities.size >= 5 ? 'critical' : info.total >= 200_000 ? 'high' : 'medium',
+        headline: `${vendor} received campaign funds from ${info.entities.size} different politicians`,
+        narrative: `The vendor "${vendor}" collected ${formatMoney(info.total)} in campaign disbursements from ${info.entities.size} separate political campaigns. The largest payers include ${topPayers.map(([, e]) => `${e.name} (${formatMoney(e.amount)} via ${e.committee})`).join(', ')}. When a single vendor is paid by this many campaigns, it can indicate a coordinated network funneling money to a common recipient.`,
+        entities: entityList.map(([id, e]) => ({
+          id,
+          name: e.name,
+          role: `Paid ${formatMoney(e.amount)} via ${e.committee}`,
+        })),
+        evidence: [
+          { type: 'FEC Disbursements', description: `${info.disbursements.length} payments totaling ${formatMoney(info.total)}` },
+          { type: 'Network Size', description: `${info.entities.size} distinct political campaigns involved` },
+        ],
+        totalMoney: info.total,
+        date: info.disbursements.sort((a, b) => b.disbursement_date?.localeCompare(a.disbursement_date || '') || 0)[0]?.disbursement_date || '',
+        networkSize: info.entities.size,
+        sourceCount: 1,
+      });
+    } else if (useCommittees) {
+      const topPayers = committeeList.slice(0, 5);
+      stories.push({
+        id: `siphon-${vendor.slice(0, 20)}`,
+        pattern: 'VENDOR_SIPHONING',
+        severity: info.committees.size >= 5 ? 'critical' : info.total >= 200_000 ? 'high' : 'medium',
+        headline: `${vendor} received campaign funds from ${info.committees.size} different committees`,
+        narrative: `The vendor "${vendor}" collected ${formatMoney(info.total)} in campaign disbursements from ${info.committees.size} separate committees. Top payers: ${topPayers.map(([, c]) => `${c.name} (${formatMoney(c.amount)})`).join(', ')}. When a single vendor is paid by this many committees, it can indicate a coordinated network funneling money to a common recipient.`,
+        entities: committeeList.map(([id, c]) => ({
+          id,
+          name: c.name,
+          role: `Paid ${formatMoney(c.amount)}`,
+        })),
+        evidence: [
+          { type: 'FEC Disbursements', description: `${info.disbursements.length} payments totaling ${formatMoney(info.total)}` },
+          { type: 'Network Size', description: `${info.committees.size} distinct committees involved` },
+        ],
+        totalMoney: info.total,
+        date: info.disbursements.sort((a, b) => b.disbursement_date?.localeCompare(a.disbursement_date || '') || 0)[0]?.disbursement_date || '',
+        networkSize: info.committees.size,
+        sourceCount: 1,
+      });
+    }
   }
 }
 

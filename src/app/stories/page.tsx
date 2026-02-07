@@ -15,6 +15,7 @@ const PATTERN_META: Record<string, { label: string; icon: string; color: string;
   HIGH_VOLUME_PASS_THROUGH: { label: 'High Volume', icon: '##', color: 'text-amber-400', bg: 'bg-amber-950/20', border: 'border-amber-500/30' },
   DARK_MONEY_CLUSTER: { label: 'Network Cluster', icon: '{}', color: 'text-cyan-400', bg: 'bg-cyan-950/20', border: 'border-cyan-500/30' },
   INVESTIGATION_FINDINGS: { label: 'Investigation', icon: '=>', color: 'text-green-400', bg: 'bg-green-950/20', border: 'border-green-500/30' },
+  DATA_LOADED: { label: 'Data Status', icon: '…', color: 'text-zinc-400', bg: 'bg-zinc-900/50', border: 'border-zinc-600' },
 };
 
 const SEVERITY_META: Record<string, { label: string; color: string; border: string }> = {

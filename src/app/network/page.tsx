@@ -49,6 +49,9 @@ export default function NetworkPage() {
       // Build entity name map
       const entityNames = new Map(entities.map((e) => [e.id, e.canonical_name]));
       const entityTypes = new Map(entities.map((e) => [e.id, e.entity_type]));
+      const genericVendorNames = new Set(['AGENCY', 'UNKNOWN', 'N/A', 'NONE', 'MISC', 'OTHER']);
+      const vendorDisplayLabel = (name: string) =>
+        genericVendorNames.has((name || '').toUpperCase().trim()) ? 'Unnamed recipient' : (name || 'Unnamed recipient');
 
       // Build kb_node bridge scores
       const bridgeScores = new Map<string, number>();
@@ -84,8 +87,9 @@ export default function NetworkPage() {
         // Ensure both nodes exist
         if (!nodes.has(srcId)) {
           const srcLabel =
-            entityNames.get(r.source_entity_id) ??
-            (r.source_entity_id != null ? String(r.source_entity_id).slice(0, 12) : 'Unknown');
+            r.source_entity_id == null
+              ? 'Unnamed entity'
+              : (entityNames.get(r.source_entity_id) ?? String(r.source_entity_id).slice(0, 12));
           nodes.set(srcId, {
             id: srcId,
             label: srcLabel,
@@ -97,8 +101,9 @@ export default function NetworkPage() {
         }
         if (!nodes.has(tgtId)) {
           const tgtLabel =
-            entityNames.get(r.target_entity_id) ??
-            (r.target_entity_id != null ? String(r.target_entity_id).slice(0, 12) : 'Unknown');
+            r.target_entity_id == null
+              ? 'Unnamed entity'
+              : (entityNames.get(r.target_entity_id) ?? String(r.target_entity_id).slice(0, 12));
           nodes.set(tgtId, {
             id: tgtId,
             label: tgtLabel,
@@ -164,8 +169,9 @@ export default function NetworkPage() {
         // Ensure entity node exists
         if (!nodes.has(entityNodeId)) {
           const label =
-            entityNames.get(f.entityId) ??
-            (f.entityId != null ? String(f.entityId).slice(0, 12) : 'Unknown');
+            f.entityId == null
+              ? 'Unlinked payments'
+              : (entityNames.get(f.entityId) ?? String(f.entityId).slice(0, 12));
           nodes.set(entityNodeId, {
             id: entityNodeId,
             label,
@@ -181,7 +187,7 @@ export default function NetworkPage() {
           const entityCount = vendorEntityCount.get(vendorKey)?.size || 1;
           nodes.set(vendorNodeId, {
             id: vendorNodeId,
-            label: f.vendor,
+            label: vendorDisplayLabel(f.vendor),
             type: 'vendor',
             totalMoney: 0,
             connections: entityCount,
