@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+
+// Disable static optimization for this page since it requires runtime data
+export const dynamic = 'force-dynamic';
 import { DataPanel } from '@/components/DataPanel';
 import { StatCard } from '@/components/StatCard';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
@@ -16,6 +19,7 @@ import {
   type Entity,
   type Signal,
 } from '@/lib/supabase/queries';
+import { isSupabaseConfigured } from '@/lib/supabase/client';
 
 export default function AnalysisPage() {
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
@@ -29,19 +33,22 @@ export default function AnalysisPage() {
     async function fetchData() {
       setLoading(true);
       try {
-        const [invData, entityData, signalData, riskData, recentData] = await Promise.all([
-          getInvestigations(),
-          getEntityCounts(),
-          getSignalStats(),
-          getHighRiskEntities(),
-          getRecentSignals(),
-        ]);
+        // Only fetch if Supabase is configured
+        if (isSupabaseConfigured()) {
+          const [invData, entityData, signalData, riskData, recentData] = await Promise.all([
+            getInvestigations(),
+            getEntityCounts(),
+            getSignalStats(),
+            getHighRiskEntities(),
+            getRecentSignals(),
+          ]);
 
-        setInvestigations(invData);
-        setEntityCounts(entityData);
-        setSignalStats(signalData);
-        setHighRiskEntities(riskData);
-        setRecentSignals(recentData);
+          setInvestigations(invData);
+          setEntityCounts(entityData);
+          setSignalStats(signalData);
+          setHighRiskEntities(riskData);
+          setRecentSignals(recentData);
+        }
       } catch (error) {
         console.error('Error fetching analysis data:', error);
       } finally {
@@ -71,6 +78,28 @@ export default function AnalysisPage() {
 
       {loading ? (
         <LoadingSpinner />
+      ) : !isSupabaseConfigured() ? (
+        <DataPanel title="Configuration Required">
+          <div className="space-y-4 text-center">
+            <div className="text-yellow-400">⚠ SUPABASE NOT CONFIGURED</div>
+            <p className="text-green-400/70">
+              To view live data, set the following environment variables:
+            </p>
+            <div className="mt-4 space-y-2 text-left text-xs">
+              <div className="border border-green-500/20 bg-green-950/10 p-3">
+                <div className="text-green-500">NEXT_PUBLIC_SUPABASE_URL</div>
+                <div className="text-green-400/50">Your Supabase project URL</div>
+              </div>
+              <div className="border border-green-500/20 bg-green-950/10 p-3">
+                <div className="text-green-500">NEXT_PUBLIC_SUPABASE_ANON_KEY</div>
+                <div className="text-green-400/50">Your Supabase anonymous key</div>
+              </div>
+            </div>
+            <p className="text-xs text-green-400/50">
+              See .env.example for reference
+            </p>
+          </div>
+        </DataPanel>
       ) : (
         <div className="space-y-6">
           {/* Overview Stats */}
