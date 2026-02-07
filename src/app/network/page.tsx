@@ -131,6 +131,8 @@ export default function NetworkPage() {
 
       for (const d of disbursements) {
         if (!d.recipient_name || !d.disbursement_amount) continue;
+        // Skip disbursements not linked to any entity — avoids creating a giant "Unlinked" hub
+        if (!d.entity_id) continue;
 
         const vendorKey = d.recipient_name.toUpperCase().trim();
         const entityId = d.entity_id;
@@ -168,13 +170,9 @@ export default function NetworkPage() {
 
         // Ensure entity node exists
         if (!nodes.has(entityNodeId)) {
-          const label =
-            f.entityId == null
-              ? 'Unlinked payments'
-              : (entityNames.get(f.entityId) ?? String(f.entityId).slice(0, 12));
           nodes.set(entityNodeId, {
             id: entityNodeId,
-            label,
+            label: entityNames.get(f.entityId) ?? String(f.entityId).slice(0, 12),
             type: 'politician',
             totalMoney: 0,
             entityId: f.entityId,
