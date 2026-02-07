@@ -1,201 +1,336 @@
 import { supabase } from './client';
 
-export interface Investigation {
-  id: string;
-  title: string;
-  status: 'active' | 'closed' | 'pending';
-  priority: 'low' | 'medium' | 'high' | 'critical';
-  created_at: string;
-  findings_count: number;
-}
+// ── Real Supabase table schemas (matching Ralph's database) ──
 
 export interface Entity {
   id: string;
-  type: 'person' | 'organization' | 'location' | 'asset';
-  name: string;
-  risk_score: number;
-  last_updated: string;
+  canonical_name: string;
+  normalized_name: string;
+  entity_type: string;
+  aliases: string[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Signal {
   id: string;
-  type: 'network' | 'financial' | 'behavioral' | 'communication';
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  detected_at: string;
+  signal_type: string;
   entity_id: string;
+  source_api: string;
+  strength: number;
+  promoted: boolean;
+  idempotency_key: string;
+  detected_at: string;
+  details: Record<string, unknown>;
 }
 
-export interface EntityCount {
-  type: string;
-  count: number;
+export interface MmixEntry {
+  id: string;
+  entity_id: string;
+  entity_name: string;
+  priority: number;
+  status: string; // active | investigating | expired
+  thesis: string;
+  signal_ids: string[];
+  sources_remaining: string[];
+  sources_queried: string[];
+  findings: Array<{
+    source: string;
+    summary: string;
+    detail?: Record<string, unknown>;
+  }>;
+  entered_at: string;
+  expires_at: string;
+  updated_at: string;
 }
 
-export interface SignalStats {
-  type: string;
-  count: number;
-  critical_count: number;
+export interface StoryPublication {
+  id: string;
+  record_type: string;
+  topic: string;
+  angle: string;
+  entity_id: string | null;
+  fact_hashes: string[];
+  details: {
+    subject?: string;
+    headline?: string;
+    score?: number;
+    story_type?: string;
+    tweet_ids?: string[];
+    thread_url?: string;
+    fact_count?: number;
+  };
+  published_at: string;
 }
 
-/**
- * Fetch all investigations (table: investigations or investigation_queue)
- */
-export async function getInvestigations() {
+export interface FecDisbursement {
+  id: string;
+  sub_id: string;
+  committee_name: string;
+  committee_id: string;
+  recipient_name: string;
+  disbursement_amount: number;
+  disbursement_date: string;
+  disbursement_description: string;
+  candidate_name: string;
+  entity_id: string;
+  created_at: string;
+}
+
+export interface ScreeningResult {
+  id: string;
+  idempotency_key: string;
+  entity_name: string;
+  screened_name: string;
+  list_name: string;
+  source: string;
+  match_type: string;
+  raw_payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface Relationship {
+  id: string;
+  source_entity_id: string;
+  target_entity_id: string;
+  relationship_type: string;
+  is_current: boolean;
+  evidence: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface Politician {
+  id: string;
+  name: string;
+  normalized_name: string;
+  state: string;
+  level: string;
+  fec_candidate_id: string;
+  entity_id: string;
+  headshot_url: string | null;
+  headshot_status: string;
+  updated_at: string;
+}
+
+// ── Queries ──
+
+/** Get active + investigating MMIX entries (Ralph's investigation queue) */
+export async function getActiveInvestigations(): Promise<MmixEntry[]> {
   const { data, error } = await supabase
-    .from('investigations')
+    .from('mmix_entries')
     .select('*')
-    .order('created_at', { ascending: false })
-    .limit(10);
-
-  if (error) {
-    const { data: queue } = await supabase
-      .from('investigation_queue')
-      .select('*')
-      .limit(10);
-    if (queue && Array.isArray(queue)) {
-      return (queue as Record<string, unknown>[]).map((row) => ({
-        id: String(row.id ?? ''),
-        title: String(row.title ?? row.name ?? row.id ?? '—'),
-        status: (row.status as Investigation['status']) ?? 'pending',
-        priority: (row.priority as Investigation['priority']) ?? 'medium',
-        created_at: String(row.created_at ?? ''),
-        findings_count: Number(row.findings_count ?? row.count ?? 0),
-      })) as Investigation[];
-    }
-    return [];
-  }
-
-  return (data || []) as Investigation[];
+    .in('status', ['active', 'investigating'])
+    .order('priority', { ascending: true });
+  if (error) { console.error('mmix_entries error:', error); return []; }
+  return (data || []) as MmixEntry[];
 }
 
-/**
- * Fetch entity counts grouped by type (supports entity_type or type column)
- */
-export async function getEntityCounts() {
+/** Get all MMIX entries including archived */
+export async function getAllInvestigations(limit = 50): Promise<MmixEntry[]> {
+  const { data, error } = await supabase
+    .from('mmix_entries')
+    .select('*')
+    .order('entered_at', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('mmix_entries error:', error); return []; }
+  return (data || []) as MmixEntry[];
+}
+
+/** Get entities with most signals (top investigation targets) */
+export async function getTopEntities(limit = 20): Promise<Entity[]> {
   const { data, error } = await supabase
     .from('entities')
     .select('*')
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('entities error:', error); return []; }
+  return (data || []) as Entity[];
+}
+
+/** Get entity by ID */
+export async function getEntity(id: string): Promise<Entity | null> {
+  const { data, error } = await supabase
+    .from('entities')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return null;
+  return data as Entity;
+}
+
+/** Get recent signals */
+export async function getRecentSignals(limit = 50): Promise<Signal[]> {
+  const { data, error } = await supabase
+    .from('signals')
+    .select('*')
+    .order('detected_at', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('signals error:', error); return []; }
+  return (data || []) as Signal[];
+}
+
+/** Get signals for a specific entity */
+export async function getEntitySignals(entityId: string): Promise<Signal[]> {
+  const { data, error } = await supabase
+    .from('signals')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('detected_at', { ascending: false });
+  if (error) return [];
+  return (data || []) as Signal[];
+}
+
+/** Get signal counts by type */
+export async function getSignalCounts(): Promise<{ type: string; count: number }[]> {
+  const { data, error } = await supabase
+    .from('signals')
+    .select('signal_type')
     .limit(5000);
-
-  if (error) {
-    console.error('Error fetching entity counts:', error);
-    return [];
+  if (error) return [];
+  const counts: Record<string, number> = {};
+  for (const row of (data || [])) {
+    const t = (row as Record<string, unknown>).signal_type as string || 'unknown';
+    counts[t] = (counts[t] || 0) + 1;
   }
-
-  const rows = (data || []) as Record<string, unknown>[];
-  const typeKey = rows[0] && ('entity_type' in rows[0] ? 'entity_type' : 'type');
-  const counts = rows.reduce((acc: Record<string, number>, row) => {
-    const t = String(row[typeKey] ?? row.type ?? row.entity_type ?? 'unknown');
-    acc[t] = (acc[t] || 0) + 1;
-    return acc;
-  }, {});
-
-  return Object.entries(counts).map(([type, count]) => ({
-    type,
-    count,
-  })) as EntityCount[];
+  return Object.entries(counts).map(([type, count]) => ({ type, count }));
 }
 
-/**
- * Fetch signal statistics grouped by type (supports different column names)
- */
-export async function getSignalStats() {
-  const { data, error } = await supabase.from('signals').select('*').limit(2000);
-
-  if (error) {
-    console.error('Error fetching signal stats:', error);
-    return [];
-  }
-
-  const rows = (data || []) as Record<string, unknown>[];
-  const typeKey = rows[0] && ('signal_type' in rows[0] ? 'signal_type' : 'type');
-  const sevKey = rows[0] && ('severity_level' in rows[0] ? 'severity_level' : 'severity');
-  const stats: Record<string, { count: number; critical_count: number }> = {};
-  for (const row of rows) {
-    const t = String(row[typeKey] ?? row.type ?? 'unknown');
-    if (!stats[t]) stats[t] = { count: 0, critical_count: 0 };
-    stats[t].count += 1;
-    const sev = String(row[sevKey] ?? row.severity ?? '').toLowerCase();
-    if (sev === 'critical') stats[t].critical_count += 1;
-  }
-  return Object.entries(stats).map(([type, { count, critical_count }]) => ({
-    type,
-    count,
-    critical_count,
-  })) as SignalStats[];
+/** Get story publications */
+export async function getStories(limit = 50): Promise<StoryPublication[]> {
+  const { data, error } = await supabase
+    .from('story_coverage')
+    .select('*')
+    .eq('record_type', 'publication')
+    .order('published_at', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('story_coverage error:', error); return []; }
+  return (data || []) as StoryPublication[];
 }
 
-/**
- * Fetch high-risk entities (risk_score >= 70), or recent entities if no risk_score column
- */
-export async function getHighRiskEntities() {
-  const { data: sample } = await supabase.from('entities').select('*').limit(1).single();
-  const hasRisk = sample && typeof (sample as Record<string, unknown>).risk_score === 'number';
+/** Get FEC disbursements for an entity */
+export async function getEntityDisbursements(entityId: string, limit = 100): Promise<FecDisbursement[]> {
+  const { data, error } = await supabase
+    .from('fec_disbursements')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('disbursement_amount', { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return (data || []) as FecDisbursement[];
+}
 
-  if (hasRisk) {
-    const { data, error } = await supabase
-      .from('entities')
-      .select('*')
-      .gte('risk_score', 70)
-      .order('risk_score', { ascending: false })
-      .limit(10);
-    if (error) {
-      console.error('Error fetching high-risk entities:', error);
-      return [];
-    }
-    return ((data || []) as Record<string, unknown>[]).map(normalizeEntity) as Entity[];
-  }
+/** Get screening results for an entity name */
+export async function getEntityScreenings(entityName: string): Promise<ScreeningResult[]> {
+  const { data, error } = await supabase
+    .from('screening_results')
+    .select('*')
+    .ilike('entity_name', `%${entityName}%`);
+  if (error) return [];
+  return (data || []) as ScreeningResult[];
+}
 
+/** Get relationships for an entity */
+export async function getEntityRelationships(entityId: string): Promise<Relationship[]> {
+  const { data: src } = await supabase
+    .from('relationships')
+    .select('*')
+    .eq('source_entity_id', entityId)
+    .eq('is_current', true);
+  const { data: tgt } = await supabase
+    .from('relationships')
+    .select('*')
+    .eq('target_entity_id', entityId)
+    .eq('is_current', true);
+  return [...(src || []), ...(tgt || [])] as Relationship[];
+}
+
+/** Get MMIX entries for a specific entity */
+export async function getEntityInvestigations(entityId: string): Promise<MmixEntry[]> {
+  const { data, error } = await supabase
+    .from('mmix_entries')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('entered_at', { ascending: false });
+  if (error) return [];
+  return (data || []) as MmixEntry[];
+}
+
+/** Get corporate filings for an entity */
+export async function getEntityFilings(entityName: string) {
+  const { data, error } = await supabase
+    .from('corporate_filings')
+    .select('*')
+    .ilike('entity_name', `%${entityName}%`)
+    .limit(50);
+  if (error) return [];
+  return data || [];
+}
+
+/** Get court cases for an entity */
+export async function getEntityCourtCases(entityName: string) {
+  const { data, error } = await supabase
+    .from('court_cases')
+    .select('*')
+    .ilike('entity_name', `%${entityName}%`)
+    .limit(50);
+  if (error) return [];
+  return data || [];
+}
+
+/** Get federal awards for an entity */
+export async function getEntityAwards(entityName: string) {
+  const { data, error } = await supabase
+    .from('federal_awards')
+    .select('*')
+    .ilike('entity_name', `%${entityName}%`)
+    .limit(50);
+  if (error) return [];
+  return data || [];
+}
+
+/** Search entities by name */
+export async function searchEntities(query: string, limit = 20): Promise<Entity[]> {
   const { data, error } = await supabase
     .from('entities')
     .select('*')
-    .limit(10);
-  if (error) {
-    return [];
-  }
-  const rows = (data || []) as Record<string, unknown>[];
-  rows.sort((a, b) => {
-    const aT = a.updated_at ?? a.last_updated ?? '';
-    const bT = b.updated_at ?? b.last_updated ?? '';
-    return String(bT).localeCompare(String(aT));
-  });
-  return rows.slice(0, 10).map(normalizeEntity) as Entity[];
+    .ilike('canonical_name', `%${query}%`)
+    .limit(limit);
+  if (error) return [];
+  return (data || []) as Entity[];
 }
 
-function normalizeEntity(row: Record<string, unknown>): Entity {
-  const name = String(row.canonical_name ?? row.name ?? row.id ?? '—');
-  const type = (row.entity_type ?? row.type ?? 'person') as Entity['type'];
-  const risk_score = typeof row.risk_score === 'number' ? row.risk_score : 0;
-  const last_updated = String(row.updated_at ?? row.last_updated ?? row.last_updated_at ?? new Date().toISOString());
+/** Search politicians by name */
+export async function searchPoliticians(query: string, limit = 20): Promise<Politician[]> {
+  const { data, error } = await supabase
+    .from('politician_universe')
+    .select('*')
+    .ilike('name', `%${query}%`)
+    .limit(limit);
+  if (error) return [];
+  return (data || []) as Politician[];
+}
+
+/** Get aggregate stats for the dashboard */
+export async function getDashboardStats() {
+  const [entities, signals, mmix, stories] = await Promise.all([
+    supabase.from('entities').select('id', { count: 'exact', head: true }),
+    supabase.from('signals').select('id', { count: 'exact', head: true }),
+    supabase.from('mmix_entries').select('id', { count: 'exact', head: true }).in('status', ['active', 'investigating']),
+    supabase.from('story_coverage').select('id', { count: 'exact', head: true }).eq('record_type', 'publication'),
+  ]);
   return {
-    id: String(row.id ?? ''),
-    type: ['person', 'organization', 'location', 'asset'].includes(type) ? type : 'person',
-    name,
-    risk_score,
-    last_updated,
+    entityCount: entities.count || 0,
+    signalCount: signals.count || 0,
+    activeInvestigations: mmix.count || 0,
+    publishedStories: stories.count || 0,
   };
 }
 
-/**
- * Fetch recent signals (supports detected_at, created_at, or first column for ordering)
- */
-export async function getRecentSignals() {
-  const { data, error } = await supabase.from('signals').select('*').limit(100);
-
-  if (error) {
-    console.error('Error fetching recent signals:', error);
-    return [];
-  }
-
-  const rows = (data || []) as Record<string, unknown>[];
-  const orderKey = rows[0] && ('detected_at' in rows[0] ? 'detected_at' : 'created_at');
-  rows.sort((a, b) => String(b[orderKey] ?? '').localeCompare(String(a[orderKey] ?? '')));
-  const typeKey = rows[0] && ('signal_type' in rows[0] ? 'signal_type' : 'type');
-  const sevKey = rows[0] && ('severity_level' in rows[0] ? 'severity_level' : 'severity');
-  return rows.slice(0, 20).map((row) => ({
-    id: String(row.id ?? ''),
-    type: (row[typeKey] ?? row.type ?? 'network') as Signal['type'],
-    severity: (row[sevKey] ?? row.severity ?? 'low') as Signal['severity'],
-    detected_at: String(row.detected_at ?? row.created_at ?? row[orderKey] ?? new Date().toISOString()),
-    entity_id: String(row.entity_id ?? ''),
-  })) as Signal[];
+/** Get politician universe stats */
+export async function getUniverseStats() {
+  const { count } = await supabase
+    .from('politician_universe')
+    .select('id', { count: 'exact', head: true });
+  return { total: count || 0 };
 }
