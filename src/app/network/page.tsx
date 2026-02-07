@@ -380,6 +380,11 @@ export default function NetworkPage() {
               <div className="text-xl font-bold text-green-400">{totalDisbursements.toLocaleString()}</div>
             </div>
           </div>
+          {totalDisbursements === 0 && (
+            <p className="max-w-6xl mx-auto mb-3 text-xs text-zinc-500">
+              No FEC disbursements in database — graph shows entities and relationships only. Load <code className="text-zinc-400">fec_disbursements</code> to see money flows and vendor/committee nodes.
+            </p>
+          )}
 
           {/* Selected node detail */}
           {selected && (
@@ -431,7 +436,7 @@ export default function NetworkPage() {
 
           <p className="max-w-6xl mx-auto mt-3 text-xs text-zinc-700">
             Drag nodes to rearrange. Scroll to zoom. Click a node to see details and connections.
-            Larger nodes = more money. Yellow = paid by multiple campaigns.
+            Node size = money flow (larger = more). Arrows show payment direction (payer → recipient). Hover links for amount.
           </p>
         </>
       )}
@@ -462,9 +467,12 @@ function renderGraph(
 
   const maxMoney = Math.max(...nodes.map((n) => n.totalMoney), 1);
 
+  // Size by money flow: scale with totalMoney; when no money, size by connections so nodes stay visible
   function nodeRadius(d: GraphNode): number {
-    if (d.totalMoney <= 0) return 3;
-    return Math.max(3, Math.min(25, Math.sqrt(d.totalMoney / maxMoney) * 25 + 3));
+    if (d.totalMoney > 0) {
+      return Math.max(4, Math.min(32, Math.sqrt(d.totalMoney / maxMoney) * 28 + 4));
+    }
+    return Math.max(4, Math.min(12, 4 + Math.min(d.connections, 8) * 0.8));
   }
 
   function nodeColor(d: GraphNode): string {
@@ -488,8 +496,22 @@ function renderGraph(
 
   function linkWidth(d: GraphLink): number {
     if (d.linkType === 'relationship') return 1;
-    return Math.max(0.3, Math.min(5, Math.sqrt(d.amount / 10000)));
+    return Math.max(0.5, Math.min(8, Math.sqrt((d.amount || 0) / 5000)));
   }
+
+  // Arrow marker for payment direction (payer → vendor)
+  const defs = svg.append('defs');
+  defs.append('marker')
+    .attr('id', 'arrow-payment')
+    .attr('viewBox', '0 -5 10 10')
+    .attr('refX', 12)
+    .attr('refY', 0)
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-4L10,0L0,4')
+    .attr('fill', '#22c55e');
 
   const simulation = d3.forceSimulation<GraphNode>(nodes)
     .force('link', d3.forceLink<GraphNode, GraphLink>(links).id((d) => d.id).distance(60).strength(0.3))
@@ -499,14 +521,20 @@ function renderGraph(
     .force('x', d3.forceX(width / 2).strength(0.03))
     .force('y', d3.forceY(height / 2).strength(0.03));
 
-  // Links
-  const link = g.append('g')
-    .selectAll('line')
-    .data(links)
-    .join('line')
-    .attr('stroke', linkColor)
-    .attr('stroke-width', linkWidth)
-    .attr('stroke-dasharray', (d) => d.linkType === 'relationship' ? '4,3' : 'none');
+  // Links — payment links get arrow marker for direction (source = payer → target = recipient)
+  const linkGrp = g.append('g').selectAll('g').data(links).join('g');
+  const link = linkGrp
+    .append('line')
+    .attr('stroke', (d) => linkColor(d))
+    .attr('stroke-width', (d) => linkWidth(d))
+    .attr('stroke-dasharray', (d) => d.linkType === 'relationship' ? '4,3' : 'none')
+    .attr('marker-end', (d) => (d.linkType === 'payment' && d.amount > 0 ? 'url(#arrow-payment)' : null));
+  linkGrp.append('title').text((d) => {
+    if (d.linkType === 'payment' && d.amount > 0) return `$${d.amount.toLocaleString()}`;
+    if (d.linkType === 'relationship') return 'Relationship';
+    if (d.linkType === 'cross_campaign') return `Cross-campaign: $${(d.amount || 0).toLocaleString()}`;
+    return '';
+  });
 
   // Nodes
   const node = g.append('g')
@@ -563,11 +591,13 @@ function renderGraph(
   node.append('title').text((d) => `${d.label}\n$${d.totalMoney.toLocaleString()}\n${d.connections} connections`);
 
   simulation.on('tick', () => {
-    link
-      .attr('x1', (d) => (d.source as GraphNode).x!)
-      .attr('y1', (d) => (d.source as GraphNode).y!)
-      .attr('x2', (d) => (d.target as GraphNode).x!)
-      .attr('y2', (d) => (d.target as GraphNode).y!);
+    linkGrp.each(function (d) {
+      const src = d.source as GraphNode;
+      const tgt = d.target as GraphNode;
+      d3.select(this).select('line')
+        .attr('x1', src.x!).attr('y1', src.y!)
+        .attr('x2', tgt.x!).attr('y2', tgt.y!);
+    });
     node.attr('cx', (d) => d.x!).attr('cy', (d) => d.y!);
     labels.attr('x', (d) => d.x!).attr('y', (d) => d.y!);
   });

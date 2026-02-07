@@ -66,16 +66,16 @@ export interface StoryPublication {
 
 export interface FecDisbursement {
   id: string;
-  sub_id: string;
-  committee_name: string;
-  committee_id: string;
+  sub_id?: string;
+  committee_name?: string | null;
+  committee_id?: string | null;
   recipient_name: string;
   disbursement_amount: number;
-  disbursement_date: string;
-  disbursement_description: string;
-  candidate_name: string;
-  entity_id: string;
-  created_at: string;
+  disbursement_date?: string | null;
+  disbursement_description?: string | null;
+  candidate_name?: string | null;
+  entity_id?: string | null;
+  created_at?: string;
 }
 
 export interface ScreeningResult {
