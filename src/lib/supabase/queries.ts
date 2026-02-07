@@ -379,6 +379,73 @@ export async function getMoneyNetwork() {
   };
 }
 
+/** Get all data needed for story classification — signals, findings, disbursements, relationships, entities */
+export async function getStoryClassificationData() {
+  // All signals (for pattern detection)
+  const { data: signals } = await supabase
+    .from('signals')
+    .select('*')
+    .order('detected_at', { ascending: false })
+    .limit(2000);
+
+  // All MMIX entries with findings
+  const { data: mmix } = await supabase
+    .from('mmix_entries')
+    .select('*')
+    .order('entered_at', { ascending: false })
+    .limit(200);
+
+  // All relationships
+  const { data: rels } = await supabase
+    .from('relationships')
+    .select('*')
+    .eq('is_current', true)
+    .limit(1000);
+
+  // All entities
+  const { data: entities } = await supabase
+    .from('entities')
+    .select('*')
+    .limit(1000);
+
+  // All disbursements (paginated)
+  const allDisbursements: FecDisbursement[] = [];
+  let offset = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data: page } = await supabase
+      .from('fec_disbursements')
+      .select('*')
+      .range(offset, offset + pageSize - 1);
+    if (!page || page.length === 0) break;
+    allDisbursements.push(...(page as FecDisbursement[]));
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  // Screening results
+  const { data: screenings } = await supabase
+    .from('screening_results')
+    .select('*')
+    .limit(500);
+
+  // kb_nodes for bridge scores
+  const { data: kbNodes } = await supabase
+    .from('kb_nodes')
+    .select('*')
+    .limit(1000);
+
+  return {
+    signals: (signals || []) as Signal[],
+    investigations: (mmix || []) as MmixEntry[],
+    relationships: (rels || []) as Relationship[],
+    entities: (entities || []) as Entity[],
+    disbursements: allDisbursements,
+    screenings: (screenings || []) as ScreeningResult[],
+    kbNodes: (kbNodes || []) as Record<string, unknown>[],
+  };
+}
+
 /** Get politician universe stats */
 export async function getUniverseStats() {
   const { count } = await supabase
